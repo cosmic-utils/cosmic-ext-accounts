@@ -24,17 +24,16 @@ jobs:
             https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
           python3 /tmp/flatpak-cargo-generator.py Cargo.lock -o crates/ui/cargo-sources.json
 
-      # Real OAuth client credentials never touch the repo. This patches the
-      # placeholders in the checked-out working copy only — nothing here is
-      # committed back — before flatpak-builder bundles the files into /app.
-      - name: Export credentials
-        run: |
-          echo "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" >> "$GITHUB_ENV"
-          echo "GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" >> "$GITHUB_ENV"
-          echo "MICROSOFT_CLIENT_ID=${{ secrets.MICROSOFT_CLIENT_ID }}" >> "$GITHUB_ENV"
+      - uses: extractions/setup-just@v4
+        with:
+          just-version: '1.58.0'
 
-      - name: Inject OAuth credentials
-        run: ./crates/ui/data/providers/inject-credentials.sh
+      - name: Configure desktop OAuth clients
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          MICROSOFT_CLIENT_ID: ${{ secrets.MICROSOFT_CLIENT_ID }}
+        run: just configure-providers crates/ui/data/providers
 
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:

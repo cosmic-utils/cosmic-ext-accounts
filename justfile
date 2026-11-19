@@ -1,4 +1,5 @@
-# Accounts for COSMIC - Build and Installation Commands
+app_id := "dev.edfloreshz.Accounts"
+ui := "crates/ui"
 
 # Default recipe - show available commands
 default:
@@ -12,15 +13,13 @@ build:
 build-lib:
     cargo build --release --lib
 
-# Build the app. One binary is the GUI, the background D-Bus service, and the
-# consent prompt — selected by ACCOUNTS_HEADLESS / ACCOUNTS_CONSENT_PROMPT.
+# Build the app, daemon, and consent prompt.
 build-gui:
     cargo build --release -p accounts_ui
 
 # Run all tests
 test:
-    cargo test --lib
-    cargo test --test integration_test
+    dbus-run-session -- cargo test --workspace
 
 # Run clippy linting
 lint:
@@ -41,53 +40,47 @@ check: test lint check-format
 clean:
     cargo clean
 
-# Install the app system-wide (requires sudo). One binary serves both the GUI
-# and the D-Bus-activated background service (see crates/ui/data/cosmic-accounts.service).
-install-gui: build-gui
-    sudo install -Dm0755 target/release/accounts_ui /usr/bin/accounts_ui
-    # D-Bus activation: one activation file + wrapper per mode of the shared
-    # binary (the wrappers set ACCOUNTS_HEADLESS / ACCOUNTS_CONSENT_PROMPT,
-    # which .service files can't).
-    sudo install -Dm0755 crates/ui/data/accounts-ui-daemon /usr/bin/accounts-ui-daemon
-    sudo install -Dm0755 crates/ui/data/accounts-consent-prompt /usr/bin/accounts-consent-prompt
-    sudo install -Dm0644 crates/ui/data/dev.edfloreshz.Accounts.service /usr/share/dbus-1/services/dev.edfloreshz.Accounts.service
-    sudo install -Dm0644 crates/ui/data/dev.edfloreshz.Accounts.ConsentPrompt.service /usr/share/dbus-1/services/dev.edfloreshz.Accounts.ConsentPrompt.service
-    # Optional systemd user unit (for `just start-daemon`), in the systemd path,
-    # not the D-Bus one.
-    sudo install -Dm0644 crates/ui/data/cosmic-accounts.service /usr/lib/systemd/user/cosmic-accounts.service
-    sudo install -Dm0644 crates/ui/resources/app.desktop /usr/share/applications/dev.edfloreshz.Accounts.desktop
-    sudo install -Dm0644 crates/ui/resources/app.metainfo.xml /usr/share/metainfo/dev.edfloreshz.Accounts.metainfo.xml
-    sudo install -Dm0644 crates/ui/resources/icons/hicolor/scalable/apps/icon.svg /usr/share/icons/hicolor/scalable/apps/dev.edfloreshz.Accounts.svg
-    sudo install -Dm0644 crates/ui/data/dev.edfloreshz.Accounts.policy /usr/share/polkit-1/actions/dev.edfloreshz.Accounts.policy
+# Build and install the shared application files.
+install: build-gui system-files
+    @if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then systemctl --user daemon-reload; fi
 
-# Install provider configurations (requires sudo). ProviderRegistry reads
-# $XDG_DATA_DIRS/accounts/providers, i.e. /usr/share/accounts/providers.
-install-configs:
-    sudo install -Dm0644 crates/ui/data/providers/google.toml /usr/share/accounts/providers/google.toml
-    sudo install -Dm0644 crates/ui/data/providers/microsoft.toml /usr/share/accounts/providers/microsoft.toml
-    @echo "Remember to set OAuth2 client credentials in /usr/share/accounts/providers/"
+# Remove the shared application files. Account data lives in the user profile.
+uninstall: (system-files "" "remove")
 
-# Install everything (requires sudo)
-install: build install-gui install-configs
+[private]
+system-files $destdir="" $operation="install":
+    #!/bin/sh
+    set -eu
+    put() {
+        if [ "$operation" = remove ]; then
+            sudo rm -f "$3"
+        elif [ -n "$destdir" ]; then
+            install -D -m "$1" "$2" "$destdir$3"
+        else
+            sudo install -D -m "$1" "$2" "$3"
+        fi
+    }
 
-# Uninstall system files (requires sudo)
-uninstall:
-    sudo rm -f /usr/bin/accounts_ui
-    sudo rm -f /usr/bin/accounts-ui-daemon
-    sudo rm -f /usr/bin/accounts-consent-prompt
-    sudo rm -f /usr/bin/accounts-consent-helper
-    sudo rm -f /usr/share/dbus-1/services/dev.edfloreshz.Accounts.service
-    sudo rm -f /usr/share/dbus-1/services/dev.edfloreshz.Accounts.ConsentPrompt.service
-    sudo rm -f /usr/lib/systemd/user/cosmic-accounts.service
-    sudo rm -f /usr/share/dbus-1/services/cosmic-accounts.service
-    sudo rm -f /usr/share/applications/dev.edfloreshz.Accounts.desktop
-    sudo rm -f /usr/share/metainfo/dev.edfloreshz.Accounts.metainfo.xml
-    sudo rm -f /usr/share/icons/hicolor/scalable/apps/dev.edfloreshz.Accounts.svg
-    sudo rm -f /usr/share/polkit-1/actions/dev.edfloreshz.Accounts.policy
-    sudo rm -rf /usr/share/accounts /etc/accounts
+    put 0755 target/release/accounts_ui /usr/bin/accounts_ui
+    put 0644 {{ui}}/resources/app.desktop /usr/share/applications/{{app_id}}.desktop
+    put 0644 {{ui}}/resources/app.metainfo.xml /usr/share/metainfo/{{app_id}}.metainfo.xml
+    put 0644 {{ui}}/resources/icons/hicolor/scalable/apps/icon.svg /usr/share/icons/hicolor/scalable/apps/{{app_id}}.svg
+    for service in {{app_id}} {{app_id}}.ConsentPrompt; do
+        put 0644 "{{ui}}/data/$service.service" "/usr/share/dbus-1/services/$service.service"
+    done
+    put 0644 {{ui}}/data/cosmic-accounts.service /usr/lib/systemd/user/cosmic-accounts.service
+    put 0644 {{ui}}/data/{{app_id}}.policy /usr/share/polkit-1/actions/{{app_id}}.policy
+    for provider in google microsoft; do
+        target="/usr/share/accounts/providers/$provider.toml"
+        if [ "$operation" = install ] && [ -z "$destdir" ] && [ -e "$target" ]; then
+            continue
+        fi
+        put 0644 "{{ui}}/data/providers/$provider.toml" "$target"
+    done
 
 # Start the background service (user session)
 start-daemon:
+    systemctl --user daemon-reload
     systemctl --user enable cosmic-accounts.service
     systemctl --user start cosmic-accounts.service
 
@@ -103,14 +96,6 @@ status:
 # View background service logs
 logs:
     journalctl --user -u cosmic-accounts.service -f
-
-# Run CLI tool with list command
-cli-list:
-    cargo run --example cli -- list
-
-# Run CLI tool with help
-cli-help:
-    cargo run --example cli -- --help
 
 # Run the background D-Bus service in the foreground with debug logging,
 # without opening a window. Run from the repo root so it picks up
@@ -146,12 +131,11 @@ run-stack:
 # List providers currently advertised by a running daemon over D-Bus
 # (requires busctl; useful to confirm capability advertisement without the UI).
 list-providers:
-    busctl --user call dev.edfloreshz.Accounts /dev/edfloreshz/Accounts/Account \
-        dev.edfloreshz.Accounts.Account ListProviders
+    busctl --user call {{app_id}} /dev/edfloreshz/Accounts/Manager {{app_id}}.Manager ListProviders
 
 # Development: watch for changes and run tests
 dev-watch:
-    cargo watch -x "test --lib" -x "test --test integration_test"
+    cargo watch -s "just test"
 
 # Generate documentation
 docs:
@@ -173,31 +157,77 @@ outdated:
 bench:
     cargo bench
 
-# Example: add a Google account (interactive)
-example-add-google:
-    @echo "Starting Google account addition..."
-    cargo run --example cli -- add Google
-
-# Example: show all accounts
-example-show-accounts:
-    cargo run --example cli -- list
-
 # Development: full workspace build check
 workspace-check:
     cargo check --workspace
 
-# Package for distribution (creates release builds and archives)
-package: clean build
-    mkdir -p dist
-    cp target/release/accounts_ui dist/ || echo "Build failed, skipping"
-    cp -r crates/ui/data dist/
-    cp README.md dist/
-    cp LICENSE* dist/ || echo "No license files found"
-    tar czf dist/accounts-$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "accounts") | .version').tar.gz -C dist .
+# Prepare provider manifests for a distributable desktop OAuth client.
+configure-providers $providers:
+    #!/bin/sh
+    set -eu
+    : "${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID}"
+    : "${GOOGLE_CLIENT_SECRET:?Set GOOGLE_CLIENT_SECRET}"
+    : "${MICROSOFT_CLIENT_ID:?Set MICROSOFT_CLIENT_ID}"
 
-# Development: run daemon and CLI in separate terminals
-dev-split:
-    @echo "Run 'just dev-daemon' in one terminal and 'just cli-list' in another"
+    system_providers=/usr/share/accounts/providers
+    providers=$(realpath -e -- "$providers")
+    staged=
+    if [ "$providers" = "$system_providers" ]; then
+        staged=$(mktemp -d)
+        trap 'rm -rf -- "$staged"' EXIT
+        cp "$providers/google.toml" "$providers/microsoft.toml" "$staged/"
+        providers=$staged
+    fi
+
+    escape() {
+        printf '%s' "$1" | sed 's/[\\"]/\\&/g; s/[\\&|]/\\&/g'
+    }
+
+    sed -i \
+        -e 's|[$]{GOOGLE_CLIENT_ID}|'"$(escape "$GOOGLE_CLIENT_ID")|g" \
+        -e 's|[$]{GOOGLE_CLIENT_SECRET}|'"$(escape "$GOOGLE_CLIENT_SECRET")|g" \
+        "$providers/google.toml"
+    sed -i -e 's|[$]{MICROSOFT_CLIENT_ID}|'"$(escape "$MICROSOFT_CLIENT_ID")|g" "$providers/microsoft.toml"
+
+    if [ -n "$staged" ]; then
+        sudo install -m 0644 "$staged/google.toml" "$staged/microsoft.toml" "$system_providers/"
+    fi
+
+# Build a system package for the current Debian-based release.
+package-native $output="target/native": build-gui
+    #!/bin/sh
+    set -eu
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    root="$work/package"
+    just system-files "$root"
+    just configure-providers "$root/usr/share/accounts/providers"
+
+    version=$(cargo pkgid --offline -p accounts_ui)
+    version=${version##*@}
+    arch=$(dpkg --print-architecture)
+    mkdir -p "$work/debian" "$root/DEBIAN" "$output"
+    cat > "$work/debian/control" <<'EOF'
+    Source: cosmic-ext-accounts
+    Maintainer: COSMIC Utilities
+
+    Package: cosmic-ext-accounts
+    Architecture: any
+    Description: Online accounts for COSMIC
+    EOF
+    shlibs=$(cd "$work" && dpkg-shlibdeps -O -e"$root/usr/bin/accounts_ui")
+    cat > "$root/DEBIAN/control" <<EOF
+    Package: cosmic-ext-accounts
+    Version: $version
+    Architecture: $arch
+    Maintainer: COSMIC Utilities
+    Depends: ${shlibs#shlibs:Depends=}, dbus, polkitd, gnome-keyring, ca-certificates, xdg-utils
+    Description: Online accounts for COSMIC
+     Set up provider accounts once and share them with participating COSMIC apps.
+    EOF
+    dpkg-deb --root-owner-group --build "$root" "$output/cosmic-ext-accounts_${version}_${arch}.deb"
+
+package: package-native
 
 # Help for setting up development environment
 dev-setup:

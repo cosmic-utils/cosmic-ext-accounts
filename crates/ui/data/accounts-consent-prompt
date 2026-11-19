@@ -1,3 +1,0 @@
-#!/bin/sh
-# D-Bus activation files cannot set environment variables.
-exec env ACCOUNTS_CONSENT_PROMPT=1 accounts_ui "$@"

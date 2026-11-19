@@ -1,28 +1,3 @@
-name := 'accounts_ui'
-appid := 'dev.edfloreshz.Accounts'
-
-rootdir := ''
-prefix := '/usr'
-
-base-dir := absolute_path(clean(rootdir / prefix))
-
-bin-src := 'target' / 'release' / name
-bin-dst := base-dir / 'bin' / name
-
-desktop := appid + '.desktop'
-desktop-src := 'resources' / desktop
-desktop-dst := clean(rootdir / prefix) / 'share' / 'applications' / desktop
-
-appdata := appid + '.metainfo.xml'
-appdata-src := 'resources' / appdata
-appdata-dst := clean(rootdir / prefix) / 'share' / 'appdata' / appdata
-
-icons-src := 'resources' / 'icons' / 'hicolor'
-icons-dst := clean(rootdir / prefix) / 'share' / 'icons' / 'hicolor'
-
-icon-svg-src := icons-src / 'scalable' / 'apps' / 'icon.svg'
-icon-svg-dst := icons-dst / 'scalable' / 'apps' / appid + '.svg'
-
 # Default recipe which runs `just build-release`
 default: build-release
 
@@ -58,16 +33,13 @@ check-json: (check '--message-format=json')
 run *args:
     env RUST_BACKTRACE=full cargo run --release {{args}}
 
-# Installs files
+# Install Accounts for the current desktop user.
 install:
-    install -Dm0755 {{bin-src}} {{bin-dst}}
-    install -Dm0644 resources/app.desktop {{desktop-dst}}
-    install -Dm0644 resources/app.metainfo.xml {{appdata-dst}}
-    install -Dm0644 {{icon-svg-src}} {{icon-svg-dst}}
+    cd ../.. && just install
 
-# Uninstalls installed files
+# Remove the current user's installed files.
 uninstall:
-    rm {{bin-dst}} {{desktop-dst}} {{icon-svg-dst}}
+    cd ../.. && just uninstall
 
 # Vendor dependencies locally
 vendor:

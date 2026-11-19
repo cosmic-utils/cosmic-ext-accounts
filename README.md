@@ -12,6 +12,31 @@
 Add your online account once, and every COSMIC app that needs it can use it. No more signing in
 separately in each app, and no passwords stored by apps that don't need them.
 
+## Installation
+
+Install a configured release package with `sudo apt install ./cosmic-ext-accounts_VERSION_ARCH.deb`.
+For a source checkout, `just install` builds the app and installs its shared files, including the
+polkit policy. Source installs preserve existing system provider manifests. After an upgrade,
+sign out and back in so the session loads the new daemon. Open **Accounts for COSMIC**
+from your app launcher to sign in.
+
+System provider manifests are installed under `/usr/share/accounts/providers`. For a source
+installation, copy the template you need to `${XDG_DATA_HOME:-$HOME/.local/share}/accounts/providers`
+and set the client configuration there. User overrides take precedence over the system defaults.
+Keep private OAuth credentials in a user-only file. For shared desktop client settings, export
+`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `MICROSOFT_CLIENT_ID`, then run
+`just configure-providers /usr/share/accounts/providers/`. The recipe uses `sudo` to install the
+configured manifests, which are readable by all local users. Sign out and back in after updating
+either location so the daemon reloads the manifests.
+
+### Building a release package
+
+On the Debian-based release you want to support, install `dpkg-dev` and set `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, and `MICROSOFT_CLIENT_ID` for distributable native desktop clients.
+Run `just package-native` to build the package under `target/native/`. The provider registrations
+must support the configured `http://127.0.0.1` loopback redirect. The package
+includes the shared desktop client configuration.
+
 ## Contributing
 
 Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).

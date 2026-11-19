@@ -14,7 +14,10 @@ fn main() -> cosmic::iced::Result {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    if std::env::var("ACCOUNTS_HEADLESS").is_ok() {
+    let mode = std::env::args_os().nth(1);
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--daemon"))
+        || std::env::var_os("ACCOUNTS_HEADLESS").is_some()
+    {
         let runtime = tokio::runtime::Runtime::new().expect("failed to start tokio runtime");
         runtime
             .block_on(accounts_daemon::run())
@@ -22,7 +25,9 @@ fn main() -> cosmic::iced::Result {
         return Ok(());
     }
 
-    if std::env::var("ACCOUNTS_CONSENT_PROMPT").is_ok() {
+    if mode.as_deref() == Some(std::ffi::OsStr::new("--consent-prompt"))
+        || std::env::var_os("ACCOUNTS_CONSENT_PROMPT").is_some()
+    {
         return accounts_consent::run();
     }
 
