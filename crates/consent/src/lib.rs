@@ -1,16 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! `dev.edfloreshz.Accounts.ConsentPrompt` — the consent dialog for
-//! `Credentials.GetAccessToken`.
-//!
-//! It runs as a **separate process** from the credentials daemon (a security
-//! boundary: the daemon stays headless and toolkit-agnostic). It is its own
-//! binary, D-Bus-activated via the `accounts-consent-prompt` wrapper; the
-//! `accounts_ui` binary also re-enters this code when `ACCOUNTS_CONSENT_PROMPT`
-//! is set.
-//!
-//! Single-shot: serves exactly one `Prompt` call, shows the dialog, returns the
-//! decision, and exits. The bus re-activates it for the next prompt.
+//! D-Bus-activated consent dialog. Handles one prompt per process.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -21,8 +11,6 @@ use tokio::sync::oneshot;
 
 const DBUS_NAME: &str = "dev.edfloreshz.Accounts.ConsentPrompt";
 const OBJECT_PATH: &str = "/dev/edfloreshz/Accounts/ConsentPrompt";
-/// Upper bound on how long the process waits for a `Prompt` call before giving
-/// up — comfortably past the daemon's own 120s consent timeout.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(130);
 
 struct PromptParams {
@@ -45,7 +33,6 @@ struct PromptService {
 
 #[zbus::interface(name = "dev.edfloreshz.Accounts.ConsentPrompt")]
 impl PromptService {
-    /// Blocks until the user answers. `true` = allow.
     async fn prompt(
         &self,
         caller_name: &str,
@@ -57,7 +44,6 @@ impl PromptService {
         {
             let mut slot = self.slot.lock().expect("job slot poisoned");
             if slot.is_some() {
-                // Already showing a prompt; refuse extras rather than queue.
                 return false;
             }
             *slot = Some(Job {
@@ -73,7 +59,6 @@ impl PromptService {
 
         let decision = reply_rx.await.unwrap_or(false);
 
-        // Reply is about to be sent; exit shortly after so it flushes first.
         tokio::spawn(async {
             tokio::time::sleep(Duration::from_millis(400)).await;
             std::process::exit(0);
@@ -83,8 +68,6 @@ impl PromptService {
     }
 }
 
-/// Entry point for the consent prompt: waits for one `Prompt` call, shows the
-/// dialog, returns the decision, and exits.
 pub fn run() -> cosmic::iced::Result {
     let slot: JobSlot = Arc::new(Mutex::new(None));
 
@@ -113,7 +96,6 @@ pub fn run() -> cosmic::iced::Result {
         });
     }
 
-    // Wait for the daemon's Prompt call to land a job.
     let started = std::time::Instant::now();
     let job = loop {
         if let Some(job) = slot.lock().expect("job slot poisoned").take() {
@@ -184,8 +166,6 @@ impl cosmic::Application for Prompt {
                 p.caller_name, p.service, p.provider_id
             )));
 
-        // Buttons are pinned outside the scroll area so they are always visible,
-        // however long the caller/account names are.
         let actions = widget::Row::new()
             .spacing(8)
             .width(Length::Fill)
@@ -210,7 +190,6 @@ impl cosmic::Application for Prompt {
         if let Some(reply) = self.reply.take() {
             let _ = reply.send(decision);
         }
-        // The bus side schedules process exit once it has the reply.
         Task::none()
     }
 }

@@ -31,8 +31,7 @@ impl RequestStatus {
     }
 }
 
-/// Object-path properties can't be null over D-Bus, so "unset" is represented as the
-/// root path `/`, which is never a valid account/request path in this tree.
+/// D-Bus object paths cannot be null, so `/` represents an unset path.
 pub fn empty_object_path() -> OwnedObjectPath {
     OwnedObjectPath::try_from("/").expect("root path is always valid")
 }
@@ -43,8 +42,7 @@ pub struct RequestState {
     pub interaction_uri: String,
     pub error_message: String,
     pub account: OwnedObjectPath,
-    /// CSRF token correlating this request with the pending OAuth2 flow in `AuthManager`,
-    /// so `Cancel` and the timeout task can evict the matching `pending_auth` entry.
+    /// Identifies the pending OAuth flow to discard on cancellation or timeout.
     pub csrf_token: Option<String>,
 }
 

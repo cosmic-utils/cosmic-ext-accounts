@@ -1,9 +1,4 @@
-//! Coarse (layer 1) authorization via polkit.
-//!
-//! The spec mandates a two-layer authorization model: this module is layer 1, a
-//! system-wide polkit check keyed on a small fixed set of actions. Layer 2 (the
-//! per-account, per-service consent grant table) is applied on top of a positive
-//! result here and lives elsewhere.
+//! Checks system polkit policy before the daemon applies per-app grants.
 
 use std::collections::HashMap;
 
@@ -11,11 +6,9 @@ use tokio::sync::OnceCell;
 use zbus::message::Header;
 use zbus_polkit::policykit1::{AuthorityProxy, CheckAuthorizationFlags, Subject};
 
-/// `auth_self` — gates account mutations (`EnableService`, `DisableService`,
-/// `Remove`, and the `DisplayName` property write).
+/// `auth_self` for account mutations.
 pub const ACTION_MANAGE_OWN_ACCOUNTS: &str = "dev.edfloreshz.Accounts.manage-own-accounts";
-/// `allow_active: yes` — gates `GetAccessToken`. Necessary but not sufficient:
-/// the layer-2 grant table still applies once this passes.
+/// `allow_active: yes` for token requests.
 pub const ACTION_GET_TOKEN: &str = "dev.edfloreshz.Accounts.get-token";
 /// `auth_admin` — reserved for the not-yet-implemented `RegisterProvider`.
 #[allow(dead_code)]
@@ -32,10 +25,7 @@ async fn session_bus() -> zbus::Result<&'static zbus::Connection> {
     SESSION_BUS.get_or_try_init(zbus::Connection::session).await
 }
 
-/// Returns `true` only if polkit positively authorizes the message sender for
-/// `action_id`. Any failure to reach or query polkit is treated as a denial
-/// (fail closed), matching the spec's stance that credential brokering must not
-/// fall back to permissive behaviour when the authority is unavailable.
+/// Denies access when polkit is unavailable or its check fails.
 pub async fn check(header: &Header<'_>, action_id: &str) -> bool {
     match check_inner(header, action_id).await {
         Ok(authorized) => authorized,
@@ -47,9 +37,7 @@ pub async fn check(header: &Header<'_>, action_id: &str) -> bool {
 }
 
 async fn check_inner(header: &Header<'_>, action_id: &str) -> zbus::Result<bool> {
-    // polkit runs on the system bus; a `system-bus-name` subject built from the
-    // caller's *session*-bus name can't be resolved there. Resolve the caller's
-    // pid on the session bus and use a `unix-process` subject instead.
+    // The system-bus authority needs a process subject for session-bus callers.
     let sender = header
         .sender()
         .ok_or_else(|| zbus::Error::Failure("message has no sender".to_string()))?;

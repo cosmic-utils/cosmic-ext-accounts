@@ -1,11 +1,4 @@
-//! `dev.edfloreshz.Accounts.Credentials` — the one interface over which secrets
-//! (short-lived access tokens) cross the bus. Served on the same object path as
-//! the owning `Account`.
-//!
-//! `GetAccessToken` runs the spec's two-layer authorization:
-//!   1. coarse polkit action `dev.edfloreshz.Accounts.get-token` (fails closed);
-//!   2. a per-`(account, service, caller)` consent grant in the daemon's own
-//!      table — `allow` issues, `deny` refuses, no row triggers a user prompt.
+//! Issues credentials after polkit authorization and per-app, per-service consent.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -30,8 +23,7 @@ pub struct CredentialsInterface {
     pub(crate) config: Arc<Mutex<AccountsConfig>>,
     pub(crate) auth_manager: Arc<Mutex<AuthManager>>,
     pub(crate) grants: GrantStore,
-    /// Accounts whose cached token a caller reported dead via `InvalidateToken`;
-    /// the next `GetAccessToken` forces a refresh and clears the flag.
+    /// Accounts whose next token request must force a refresh.
     pub(crate) stale: Arc<Mutex<HashSet<Uuid>>>,
 }
 
@@ -62,8 +54,6 @@ impl CredentialsInterface {
 
 #[interface(name = "dev.edfloreshz.Accounts.Credentials")]
 impl CredentialsInterface {
-    /// "oauth2" | "basic" | "none" — tells the caller how to use the token.
-    /// Every provider this daemon supports today is OAuth2.
     #[zbus(property)]
     async fn auth_method(&self) -> Result<String> {
         Ok("oauth2".to_string())
@@ -75,7 +65,6 @@ impl CredentialsInterface {
         #[zbus(connection)] connection: &zbus::Connection,
         service: &str,
     ) -> std::result::Result<(String, i64), TokenError> {
-        // Gate 1: coarse polkit.
         if !polkit::check(&header, polkit::ACTION_GET_TOKEN).await {
             return Err(TokenError::AccessDenied(format!(
                 "polkit denied {}",
@@ -99,7 +88,6 @@ impl CredentialsInterface {
             )));
         }
 
-        // Gate 2: per-(account, service, caller) consent grant.
         let who = caller::resolve(connection, &header).await;
         match who.identity.as_deref() {
             Some(identity) => {
@@ -153,13 +141,9 @@ impl CredentialsInterface {
             }
         }
 
-        // Both gates passed: hand back a fresh token.
         let force_refresh = self.stale.lock().await.remove(&self.id);
         let mut auth_manager = self.auth_manager.lock().await;
 
-        // Handler-based accounts store an opaque blob rather than an OAuth2
-        // token. If the caller flagged it stale (InvalidateToken), re-run the
-        // handler to mint a fresh blob; otherwise hand back what we have.
         if let Ok(credential) = auth_manager.get_account_credentials(&self.id).await
             && credential.token_type == "handler"
         {
@@ -199,8 +183,7 @@ impl CredentialsInterface {
         Ok((credential.access_token, expires_at))
     }
 
-    /// Mark the cached token stale after a downstream 401 so the next
-    /// `GetAccessToken` forces a refresh instead of returning the dead token.
+    /// Force a refresh on the next token request after a provider returns 401.
     async fn invalidate_token(&self, #[zbus(header)] header: Header<'_>) -> Result<()> {
         if !polkit::check(&header, polkit::ACTION_GET_TOKEN).await {
             return Err(zbus::fdo::Error::AccessDenied(format!(

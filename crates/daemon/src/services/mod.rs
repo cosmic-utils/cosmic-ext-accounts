@@ -13,15 +13,11 @@ pub use mail::*;
 pub use tasks::*;
 use zbus::fdo::{Error, Result};
 
-/// D-Bus object path of the `Account` that an `Endpoint.*` interface is served
-/// on — the endpoints share the account's path rather than living under their
-/// own service tree.
+/// Endpoint interfaces share the account's D-Bus path.
 pub(crate) fn endpoint_object_path(account: &Account) -> String {
     format!("/dev/edfloreshz/Accounts/Accounts/{}", account.dbus_id())
 }
 
-/// The account's provider manifest, which now carries the endpoint config
-/// directly (no out-of-process provider RPC).
 pub(crate) fn provider_manifest(
     account: &Account,
 ) -> Result<&'static accounts_core::ProviderManifest> {
@@ -39,8 +35,6 @@ pub(crate) fn account_identity(account: &Account) -> String {
         .unwrap_or_else(|| account.username.clone())
 }
 
-/// Refresh the account's stored credentials if they have expired, so the
-/// endpoint's consumer can rely on `Credentials.GetAccessToken` succeeding.
 pub(crate) async fn refresh_account_credentials(account: &mut Account) -> Result<()> {
     let mut auth = crate::auth::AuthManager::new()
         .await

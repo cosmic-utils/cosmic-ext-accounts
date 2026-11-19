@@ -39,17 +39,13 @@ pub struct AppModel {
     selected_account: Option<Account>,
     /// Consent grants for `selected_account`: `(service, caller_identity, decision)`.
     grants: Vec<(String, String, String)>,
-    /// The sign-in attempt currently waiting on the user's browser, if any.
     pending_auth: Option<PendingAuth>,
 }
 
-/// A sign-in that has been handed off to the browser and has not come back yet.
 #[derive(Default)]
 struct PendingAuth {
-    /// The `Request` object tracking this attempt, once `CreateAccount` returns it.
     request_path: Option<zbus::zvariant::OwnedObjectPath>,
-    /// The authorization URL, once the daemon has produced it. Kept around so the
-    /// user can reopen the page if their browser never appeared.
+    /// Retained so the user can reopen sign-in if the browser failed to open.
     url: Option<String>,
 }
 
@@ -197,8 +193,7 @@ impl cosmic::Application for AppModel {
     }
 
     fn on_escape(&mut self) -> cosmic::app::Task<Self::Message> {
-        // A sign-in dialog is only meaningful while we are still waiting on the
-        // browser, so dismissing it also gives up on the attempt.
+        // Dismissing the dialog cancels the pending sign-in.
         if matches!(self.dialog_pages.front(), Some(DialogPage::SigningIn(_))) {
             self.pending_auth = None;
         }
@@ -383,9 +378,7 @@ impl cosmic::Application for AppModel {
 
                 self.accounts = accounts;
 
-                // Keep pointing at the same account so a background refresh does not
-                // move the user, and fall back to the first one so a populated app
-                // never opens on the "no accounts yet" screen.
+                // Preserve selection across refreshes, falling back to the first account.
                 self.selected_account = selected_id
                     .and_then(|id| self.accounts.iter().find(|account| account.id == id))
                     .or_else(|| self.accounts.first())
@@ -393,8 +386,7 @@ impl cosmic::Application for AppModel {
 
                 self.rebuild_nav();
 
-                // Open the sidebar the moment there is something to put in it, but
-                // otherwise leave whatever the user chose alone.
+                // Open the sidebar on the transition from zero accounts.
                 if was_empty && !self.accounts.is_empty() {
                     self.core.nav_bar_set_toggled(true);
                 }
@@ -595,19 +587,15 @@ impl cosmic::Application for AppModel {
             }
             Message::RequestCreated(path) => {
                 let Some(pending) = self.pending_auth.as_mut() else {
-                    // The user gave up while the daemon was preparing the request.
                     return Task::none();
                 };
                 pending.request_path = Some(path);
             }
             Message::AuthUrlReady(url) => {
                 let Some(pending) = self.pending_auth.as_mut() else {
-                    // The user gave up while the daemon was preparing the URL.
                     return Task::none();
                 };
-                // The request watch can observe `needs-interaction` more than
-                // once (initial read + the StatusChanged signal); only open the
-                // browser the first time. "Open again" stays manual.
+                // Open the browser once even if the initial read and signal report the same state.
                 let already_open = pending.url.is_some();
                 pending.url = Some(url.clone());
                 if !already_open {
@@ -683,7 +671,6 @@ impl cosmic::Application for AppModel {
 }
 
 impl AppModel {
-    /// The name to show for an account wherever a single line has to identify it.
     fn account_label(&self, account: &Account) -> String {
         if account.username.is_empty() {
             account.display_name.clone()
@@ -737,7 +724,6 @@ const ACCOUNT_REMOVED: &str = "account_removed";
 
 const DAEMON_SIGNALS: [&str; 2] = [ACCOUNT_ADDED, ACCOUNT_REMOVED];
 
-/// Bridges one of the daemon's `Manager` D-Bus signals into the application's message stream.
 async fn watch_daemon_signal(signal: &'static str, output: Sender<Message>) {
     let Ok(client) = AccountsClient::new().await else {
         tracing::error!("Failed to connect to the daemon to watch for {signal}");
@@ -763,8 +749,6 @@ async fn watch_daemon_signal(signal: &'static str, output: Sender<Message>) {
     }
 }
 
-/// Drives a single sign-in attempt: watches its `Request` object until it reaches a
-/// terminal status, emitting `AuthUrlReady`/`AccountAdded`/`AuthFailed` along the way.
 async fn watch_request(path: zbus::zvariant::OwnedObjectPath, mut output: Sender<Message>) {
     let Ok(client) = AccountsClient::new().await else {
         tracing::error!("Failed to connect to the daemon to watch the sign-in request");

@@ -111,9 +111,7 @@ impl AccountsClient {
             .collect())
     }
 
-    /// Kicks off sign-in for `provider` and returns a proxy to the `Request` object that
-    /// tracks it; the caller watches `StatusChanged` (or polls `Status`) to know when to
-    /// open `InteractionUri` and when the flow reaches a terminal state.
+    /// Starts sign-in. Watch the request status and open `InteractionUri` when prompted.
     pub async fn create_account(&mut self, provider: &Provider) -> Result<RequestProxy<'static>> {
         let path = self
             .manager
@@ -195,9 +193,7 @@ impl AccountsClient {
         proxy.revoke_grant(service, caller_identity).await
     }
 
-    /// `(access_token, expires_at)` for one service, subject to polkit and the
-    /// per-(account, service, caller) consent grant. Served by the `Credentials`
-    /// interface on the account's own object path.
+    /// Returns `(access_token, expires_at)` after authorization for the requested service.
     pub async fn get_access_token(
         &mut self,
         id: &Uuid,
@@ -211,8 +207,7 @@ impl AccountsClient {
         proxy.get_access_token(&service.to_string()).await
     }
 
-    /// Re-runs the OAuth2 flow for an existing account and refreshes its stored
-    /// credentials on success. Same `Request`-tracking pattern as `create_account`.
+    /// Starts reauthentication with the same request lifecycle as `create_account`.
     pub async fn reauthenticate(&mut self, id: &Uuid) -> Result<RequestProxy<'static>> {
         let proxy = self.account_proxy(Self::account_path(id)).await?;
         let path = proxy.reauthenticate().await?;

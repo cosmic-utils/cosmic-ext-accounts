@@ -15,10 +15,8 @@ use zbus::{
     zvariant::{ObjectPath, OwnedObjectPath},
 };
 
-/// A `Request` object is left registered for this long after reaching a terminal state,
-/// so a caller reading `Status` right after `StatusChanged` fires doesn't race removal.
+/// Keep terminal requests registered so callers can read their final state after the signal.
 const REQUEST_GRACE_PERIOD: Duration = Duration::from_secs(5);
-/// OAuth2 interactive flows can be slow; this is unrelated to any later consent-prompt timeout.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 pub fn account_object_path(id: &uuid::Uuid) -> OwnedObjectPath {
@@ -110,8 +108,6 @@ impl ManagerInterface {
         account: OwnedObjectPath,
     ) -> zbus::Result<()>;
 
-    /// Fired when any account's `Enabled` master switch is flipped, carrying that
-    /// account's object path and the new value.
     #[zbus(signal)]
     pub(crate) async fn account_toggled(
         emitter: &SignalEmitter<'_>,
@@ -120,10 +116,7 @@ impl ManagerInterface {
     ) -> zbus::Result<()>;
 }
 
-/// Registers a new `Request` object at `Status = "pending"` and spawns the async task that
-/// drives the OAuth2 flow. Shared by `Manager.CreateAccount` and `Account.Reauthenticate`;
-/// `existing_account` distinguishes creating a brand-new account from refreshing one's
-/// credentials in place.
+/// Starts sign-in for a new or existing account and returns its request path.
 pub(crate) async fn create_request(
     provider_id: String,
     existing_account: Option<Uuid>,
@@ -184,9 +177,6 @@ pub(crate) async fn create_request(
     Ok(path)
 }
 
-/// Drives a `[handler]` provider's `Request`: the external `ProviderHandler`
-/// owns whatever interaction is needed, so the daemon just makes the one D-Bus
-/// call and finalizes on the result.
 async fn run_handler_flow(
     provider_id: String,
     existing_account: Option<Uuid>,
@@ -242,8 +232,7 @@ async fn run_handler_flow(
     .await;
 }
 
-/// Fails a still-pending `Request` after `REQUEST_TIMEOUT`. Unlike
-/// `request_timeout` there is no CSRF/`pending_auth` entry to discard.
+/// Handler requests have no OAuth state to discard on timeout.
 async fn terminal_timeout(
     request_id: String,
     state: Arc<Mutex<RequestState>>,

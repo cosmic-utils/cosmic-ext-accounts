@@ -107,8 +107,6 @@ impl AuthManager {
             auth_request = auth_request.add_extra_param(key.clone(), value.clone());
         }
 
-        // Caller hints from `Manager.CreateAccount` params (e.g. `login_hint`)
-        // go on the authorize URL, after the manifest's own extra params.
         for (key, value) in &params {
             auth_request = auth_request.add_extra_param(key.clone(), value.clone());
         }
@@ -129,13 +127,11 @@ impl AuthManager {
         Ok((auth_url.to_string(), csrf_secret))
     }
 
-    /// Removes a pending flow without completing it, e.g. on `Request.Cancel` or timeout.
     pub fn discard_pending(&mut self, csrf_token: &str) {
         self.pending_auth.remove(csrf_token);
     }
 
-    /// Looks up the `Request` id for a pending flow without consuming it, used when the
-    /// OAuth redirect carries a provider-side error instead of a code.
+    /// Find the pending request when a provider redirects with an error.
     pub fn request_id_for_csrf(&self, csrf_token: &str) -> Option<String> {
         self.pending_auth
             .get(csrf_token)
@@ -226,10 +222,7 @@ impl AuthManager {
         })
     }
 
-    /// Auth path for providers that declare a `[handler]`: the daemon can't
-    /// drive their flow itself, so it calls the external
-    /// `dev.edfloreshz.Accounts.ProviderHandler` service, which returns an
-    /// identity and an opaque credential blob the daemon stores verbatim.
+    /// Stores the identity and opaque credential returned by the external handler.
     pub async fn authenticate_via_handler(
         &mut self,
         provider_id: String,
@@ -284,10 +277,7 @@ impl AuthManager {
         })
     }
 
-    /// Re-runs `ProviderHandler.Authenticate` for an existing handler-based
-    /// account, passing the stored blob back so the handler can mint a fresh
-    /// credential (its own "later invocation" — the interface stays one method
-    /// wide). Called when `Credentials.InvalidateToken` marked the account stale.
+    /// Passes the stored blob back to the handler to obtain fresh credentials.
     pub async fn refresh_handler_credentials(&mut self, account_id: &Uuid) -> Result<Credential> {
         let account = AccountsConfig::config()
             .get_account(account_id)
@@ -348,9 +338,6 @@ impl AuthManager {
             })
     }
 
-    /// Fetches the account identity from the provider's `[userinfo]` endpoint:
-    /// one bearer-authenticated `GET`, then the configured fields are read out
-    /// of the JSON response.
     async fn get_user_info(
         &self,
         manifest: &accounts_core::ProviderManifest,

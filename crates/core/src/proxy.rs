@@ -27,8 +27,7 @@ pub trait Manager {
     #[zbus(signal)]
     fn account_removed(account: OwnedObjectPath) -> Result<()>;
 
-    /// Fired when any account's `Enabled` master switch is flipped, carrying that
-    /// account's object path and the new value.
+    /// Reports the account path and its new enabled state.
     #[zbus(signal)]
     fn account_toggled(account: OwnedObjectPath, enabled: bool) -> Result<()>;
 }
@@ -88,8 +87,6 @@ pub trait Account {
     #[zbus(property)]
     fn enabled_services(&self) -> Result<Vec<String>>;
 
-    /// Extra property beyond the staged spec, kept so the UI can still show when an
-    /// account was created/last used without a dedicated history store.
     #[zbus(property)]
     fn created_at(&self) -> Result<String>;
 
@@ -113,8 +110,7 @@ pub trait Account {
     fn services_changed(enabled_services: Vec<String>) -> Result<()>;
 }
 
-/// `dev.edfloreshz.Accounts.Credentials` — served on the same object path as the
-/// owning `Account`. The only interface over which access tokens cross the bus.
+/// Credential interface on the account's object path.
 #[proxy(
     default_service = "dev.edfloreshz.Accounts",
     interface = "dev.edfloreshz.Accounts.Credentials"
@@ -123,9 +119,7 @@ pub trait Credentials {
     #[zbus(property)]
     fn auth_method(&self) -> Result<String>;
 
-    /// Returns a valid access token and its expiry (unix seconds, 0 = n/a) for
-    /// the named service, subject to polkit + the per-(account, service, caller)
-    /// consent grant.
+    /// Returns the access token and expiry in Unix seconds (0 if unavailable).
     async fn get_access_token(&self, service: &str) -> Result<(String, i64)>;
 
     async fn invalidate_token(&self) -> Result<()>;
@@ -151,10 +145,6 @@ pub trait Provider {
     #[zbus(property)]
     fn auth_method(&self) -> Result<String>;
 }
-
-// The `Endpoint.*` interfaces say WHERE a service's data lives and HOW to
-// authenticate to it — never the data itself. They are served on the owning
-// Account's object path and appear/disappear as services are enabled/disabled.
 
 #[proxy(
     interface = "dev.edfloreshz.Accounts.Endpoint.Calendar",
@@ -209,23 +199,10 @@ pub trait Mail {
     fn auth_method(&self) -> Result<String>;
 }
 
-/// Implemented by a third-party service, not by the accounts daemon. Referenced
-/// from a `.provider` manifest's `[handler]` section for providers whose auth
-/// flow isn't a stock OAuth2 one the daemon already knows how to drive. This is
-/// the entire extension point for non-standard auth — deliberately one method
-/// wide; never add a second.
-/// Reserved `params` key the daemon uses to pass an existing credential blob
-/// (base64) back into `Authenticate` when refreshing a handler-based account —
-/// the handler's "own later invocation" per the spec, keeping the interface one
-/// method wide.
 pub const HANDLER_BLOB_PARAM: &str = "dev.edfloreshz.Accounts.credential_blob";
 
 #[proxy(interface = "dev.edfloreshz.Accounts.ProviderHandler")]
 pub trait ProviderHandler {
-    /// Drives whatever custom flow is needed and returns an opaque credential
-    /// blob the daemon stores and later uses to mint access tokens. `params` is
-    /// whatever `Manager.CreateAccount` was given, passed through. (`a{sv}` in
-    /// the spec; kept as `a{ss}` here to match this codebase's existing param
-    /// simplification.)
+    /// Returns the account identity and an opaque credential blob.
     async fn authenticate(&self, params: HashMap<String, String>) -> Result<(String, Vec<u8>)>;
 }

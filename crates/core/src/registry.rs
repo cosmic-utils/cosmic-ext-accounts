@@ -29,8 +29,7 @@ pub struct ProviderManifestInfo {
     pub icon: Option<String>,
 }
 
-/// How the daemon learns the account identity after a successful OAuth2 flow:
-/// one authenticated `GET` against `url`, then pull these fields out of the JSON.
+/// How the daemon learns the account identity after a successful OAuth2 flow.
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserInfoManifest {
     pub url: String,
@@ -38,7 +37,6 @@ pub struct UserInfoManifest {
     pub display_name_field: String,
     #[serde(default = "default_email_field")]
     pub email_field: String,
-    /// Field to use as the stable username; falls back to `email_field`.
     #[serde(default)]
     pub username_field: Option<String>,
 }
@@ -51,8 +49,7 @@ fn default_email_field() -> String {
     "email".to_string()
 }
 
-/// A CalDAV/CardDAV collection URL. `${identity}` in the template is replaced
-/// with the account's identity (email or username) at resolution time.
+/// A CalDAV/CardDAV collection URL.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DavEndpointManifest {
     pub uri_template: String,
@@ -94,9 +91,7 @@ pub struct EndpointManifest {
     pub mail: Option<MailEndpointManifest>,
 }
 
-/// Present only for providers whose auth flow the daemon can't drive itself
-/// (device-code, custom SSO, client certs). Points at a service implementing
-/// `dev.edfloreshz.Accounts.ProviderHandler`.
+/// D-Bus address of an external `ProviderHandler`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct HandlerManifest {
     pub bus_name: String,

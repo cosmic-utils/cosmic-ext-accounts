@@ -61,7 +61,6 @@ impl MailService {
         Ok(self.endpoint()?.smtp_port)
     }
 
-    /// Mirrors `Credentials.AuthMethod`.
     #[zbus(property)]
     async fn auth_method(&self) -> Result<String> {
         Ok("oauth2".to_string())

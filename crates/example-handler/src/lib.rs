@@ -1,13 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! A reference `dev.edfloreshz.Accounts.ProviderHandler` — the extension point
-//! for providers whose auth flow the daemon can't drive itself. This one fakes
-//! a device-code flow: it "issues" an opaque credential blob and, when handed a
-//! previous blob back on refresh, returns a rotated one.
-//!
-//! It exists to exercise the daemon's handler path end to end; a real handler
-//! (device-code, enterprise SSO, smartcard) would ship as its own project and
-//! be pointed at from a provider manifest's `[handler]` section.
+//! Reference provider handler that simulates sign-in and credential rotation.
 
 use std::collections::HashMap;
 
@@ -17,18 +10,14 @@ use base64::Engine;
 pub const BUS_NAME: &str = "dev.edfloreshz.Accounts.ProviderHandler.Example";
 pub const OBJECT_PATH: &str = "/dev/edfloreshz/Accounts/ProviderHandler";
 
-/// The blob a fresh `Authenticate` hands back.
 pub const INITIAL_BLOB: &[u8] = b"example-handler-credential-v1";
-/// Appended to the previous blob on every refresh, so rotation is observable.
 pub const REFRESH_SUFFIX: &[u8] = b"+refreshed";
 
 pub struct ExampleHandler;
 
 #[zbus::interface(name = "dev.edfloreshz.Accounts.ProviderHandler")]
 impl ExampleHandler {
-    /// `params` is whatever `Manager.CreateAccount` was given, passed straight
-    /// through by the daemon — plus, on a refresh, the previous blob under
-    /// `HANDLER_BLOB_PARAM` (base64).
+    /// On refresh, `params` includes the previous blob as base64 under `HANDLER_BLOB_PARAM`.
     async fn authenticate(
         &self,
         params: HashMap<String, String>,
@@ -54,8 +43,7 @@ impl ExampleHandler {
     }
 }
 
-/// Owns [`BUS_NAME`] on the session bus and serves [`ExampleHandler`] until the
-/// process is killed.
+/// Serves the example handler on the session bus.
 pub async fn run() -> zbus::Result<()> {
     let _connection = zbus::connection::Builder::session()?
         .name(BUS_NAME)?

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! The screens the window can show, and the pieces they share.
-
 use crate::app::{AppModel, Message};
 use crate::fl;
 use accounts_core::Local;
@@ -17,15 +15,11 @@ const APP_ICON: &[u8] = include_bytes!("../../resources/icons/hicolor/scalable/a
 const GOOGLE_ICON: &[u8] = include_bytes!("../../resources/img/google.png");
 const MICROSOFT_ICON: &[u8] = include_bytes!("../../resources/img/microsoft.png");
 
-/// How wide a settings page is allowed to grow before it stops stretching.
 const CONTENT_WIDTH: f32 = 720.0;
-/// How wide a block of explanatory text is allowed to grow.
 const PROSE_WIDTH: f32 = 520.0;
-/// How wide the provider picker is allowed to grow on the welcome screen.
 const PICKER_WIDTH: f32 = 360.0;
 
 impl AppModel {
-    /// The first thing someone sees when they have no accounts yet.
     pub(super) fn welcome_view(&self) -> Element<'_, Message> {
         if self.providers.is_empty() {
             return self.empty_state(
@@ -71,7 +65,7 @@ impl AppModel {
             .into()
     }
 
-    /// Shown when accounts exist but the nav bar selection was cleared.
+    /// Shown when accounts exist but none is selected.
     pub(super) fn no_selection_view(&self) -> Element<'_, Message> {
         self.empty_state(
             "system-users-symbolic",
@@ -81,7 +75,6 @@ impl AppModel {
         )
     }
 
-    /// Everything there is to know about, and change on, a single account.
     pub(super) fn account_view<'a>(&'a self, account: &'a Account) -> Element<'a, Message> {
         let mut sections = vec![
             self.account_header(account),
@@ -118,7 +111,6 @@ impl AppModel {
             .push(widget::text::title3(title.clone()))
             .spacing(spacing().space_xxxs);
 
-        // The subtitle only earns its space when it says something the title did not.
         if label != title {
             names = names.push(widget::text::body(label).class(cosmic::style::Text::Default));
         }
@@ -232,8 +224,7 @@ impl AppModel {
             .into()
     }
 
-    /// The provider picker, shared by the welcome screen and the add-account dialog.
-    /// The provider picker, shared by the welcome screen and the add-account dialog.
+    /// Shared by the welcome screen and add-account dialog.
     pub(super) fn provider_list(&self) -> Element<'_, Message> {
         if self.providers.is_empty() {
             return widget::text::body(fl!("no-account-providers"))
@@ -267,7 +258,6 @@ impl AppModel {
             .into()
     }
 
-    /// The provider's human-readable name, falling back to its identifier.
     pub(super) fn provider_name(&self, provider_id: &str) -> String {
         self.providers
             .iter()
@@ -283,8 +273,6 @@ impl AppModel {
             .into()
     }
 
-    /// Resolves a provider's icon, preferring what the provider advertises and
-    /// falling back to the icons shipped with the application.
     pub(super) fn provider_icon_handle(&self, provider_id: &str) -> widget::icon::Handle {
         let source = self
             .providers
@@ -293,7 +281,6 @@ impl AppModel {
             .and_then(|provider| provider.icon_source());
 
         match source {
-            // A remote icon is only usable once it has finished downloading.
             Some(IconSource::Url(url)) => match self.icon_cache.get(&url) {
                 Some(handle) => handle.clone(),
                 None => bundled_provider_icon(provider_id),
@@ -351,7 +338,6 @@ fn bundled_provider_icon(provider_id: &str) -> widget::icon::Handle {
     }
 }
 
-/// The name, explanation, and icon shown for a service in the account page.
 fn service_details(service: &Service) -> (String, String, &'static str) {
     match service {
         Service::Email => (
@@ -377,8 +363,6 @@ fn service_details(service: &Service) -> (String, String, &'static str) {
     }
 }
 
-/// Turns a stored `caller_identity` — a sandbox app id or an absolute exe path —
-/// into something short to show the user.
 pub(super) fn caller_label(caller_identity: &str) -> String {
     if caller_identity.starts_with('/') {
         caller_identity

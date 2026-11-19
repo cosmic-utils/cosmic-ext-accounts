@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Thin wrapper so the consent prompt can run as a standalone binary. All
-//! behaviour lives in `accounts_consent::run`.
+//! Standalone consent prompt.
 
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 

@@ -31,19 +31,15 @@ use request::SharedRequestState;
 use services::ServiceFactory;
 use zbus::Connection;
 
-/// Shared set of account ids whose cached token a caller reported dead via
-/// `Credentials.InvalidateToken`; the next `GetAccessToken` forces a refresh.
+/// Accounts whose next token request must force a refresh.
 type StaleTokens = Arc<Mutex<HashSet<Uuid>>>;
 
 pub static CONNECTION: OnceCell<Connection> = OnceCell::const_new();
 pub static REGISTRY: OnceCell<ProviderRegistry> = OnceCell::const_new();
-/// Daemon-wide handles, set once at startup, for code paths (the handler auth
-/// flow) that finalize an account outside the HTTP callback that carries them.
 pub static CONFIG: OnceCell<Arc<Mutex<AccountsConfig>>> = OnceCell::const_new();
 pub static GRANTS: OnceCell<GrantStore> = OnceCell::const_new();
 pub static STALE: OnceCell<StaleTokens> = OnceCell::const_new();
-/// Live `Request` objects keyed by id, so the OAuth callback handler can locate the one
-/// that corresponds to a given CSRF token/`state` and drive it to a terminal status.
+/// Live sign-in requests keyed by request ID.
 pub static REQUESTS: OnceCell<Arc<Mutex<HashMap<String, SharedRequestState>>>> =
     OnceCell::const_new();
 
@@ -199,9 +195,6 @@ async fn run_callback_server(
     }
 }
 
-/// Drives the `Request` object correlated with the redirect's `state` (CSRF token) to a
-/// terminal status, in-process rather than routing back through a self D-Bus call: request
-/// state already lives in daemon-local `Arc<Mutex<..>>`s that this handler has direct access to.
 async fn complete_from_query(
     pairs: impl Iterator<Item = (String, String)>,
     config: Arc<Mutex<AccountsConfig>>,
@@ -274,10 +267,7 @@ async fn complete_from_query(
     .await;
 }
 
-/// Persists a freshly authenticated (or reauthenticated) account, registers its
-/// `Account` + `Credentials` objects and `Endpoint.*` interfaces, emits
-/// `AccountAdded`, and drives its `Request` to `succeeded`. Shared by the OAuth
-/// HTTP callback and the `ProviderHandler` flow.
+/// Publishes authenticated accounts after OAuth callbacks or provider handler replies.
 pub(crate) async fn finalize_completed_auth(
     connection: &Connection,
     config: &Arc<Mutex<AccountsConfig>>,
@@ -312,7 +302,6 @@ pub(crate) async fn finalize_completed_auth(
                 tracing::error!("Failed to persist refreshed account: {err}");
             }
         }
-        // Credentials are fresh again; drop any stale-token marker.
         stale.lock().await.remove(&account.id);
         let path = manager::account_object_path(&account.id);
         manager::succeed_request(connection, &request_id, &state, path).await;

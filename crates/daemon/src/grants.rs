@@ -1,9 +1,4 @@
-//! Layer-2 authorization: the per-`(account, service, caller)` consent grant
-//! table. This is private daemon state, never exposed on the bus. It stores no
-//! secrets, but it is the access-control list *for* the secrets, so the file is
-//! created `0600` under `$XDG_DATA_HOME/dev.edfloreshz.Accounts/`.
-//!
-//! See `grants.md` in the protocol spec for the model.
+//! Stores per-account, per-service, per-caller consent decisions in a mode-0600 file.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -39,10 +34,7 @@ impl Decision {
     }
 }
 
-/// Canonicalises a service name from the bus (the spec uses `mail`/`tasks`,
-/// this codebase's `Service` enum still uses `Email`/`Tasks`) to the lowercase
-/// spec spelling stored in the grant table. Returns `None` for anything that
-/// isn't a real service.
+/// Maps service names and aliases to grant table keys.
 pub fn normalize_service(value: &str) -> Option<&'static str> {
     match value.to_lowercase().as_str() {
         "mail" | "email" => Some("mail"),

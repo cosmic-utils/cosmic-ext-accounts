@@ -41,7 +41,6 @@ impl CalendarService {
         Ok(endpoint.resolve(&account_identity(&self.account)))
     }
 
-    /// Mirrors `Credentials.AuthMethod`.
     #[zbus(property)]
     async fn auth_method(&self) -> Result<String> {
         Ok("oauth2".to_string())

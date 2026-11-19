@@ -12,9 +12,6 @@ use zbus::{
 };
 
 /// Per-account D-Bus object served at `/dev/edfloreshz/Accounts/Accounts/<dbus_id>`.
-///
-/// State is shared with the rest of the daemon through the same `Arc<Mutex<..>>` handles
-/// used by the `Manager` object, so every instance stays in sync with the on-disk config.
 pub struct AccountInterface {
     pub(crate) id: Uuid,
     pub(crate) config: Arc<Mutex<AccountsConfig>>,
@@ -169,8 +166,6 @@ impl AccountInterface {
         self.authorize_manage(Some(&header)).await?;
         let id = self.id;
 
-        // Drop the account's Endpoint.* interfaces (served on this same object
-        // path) before the account row and its Account/Credentials interfaces go.
         let account = self.current().await?;
         for service in ServiceFactory::create_services(&account) {
             if let Err(e) = service.remove_service().await {
@@ -234,11 +229,6 @@ impl AccountInterface {
         Ok(())
     }
 
-    /// `a(sss)` of `(service, caller_identity, decision)` — the standing
-    /// layer-2 consent grants for this account. Lower sensitivity than issuing
-    /// tokens, so it lives here on `Account` rather than on `Credentials` and
-    /// is not polkit-gated: a settings UI reads it to show "N apps can read
-    /// this account's mail".
     async fn list_grants(&self) -> Result<Vec<(String, String, String)>> {
         self.grants
             .list(&self.id)
@@ -246,9 +236,7 @@ impl AccountInterface {
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
 
-    /// Drops one `(service, caller_identity)` grant. The next `GetAccessToken`
-    /// from that caller for that service prompts afresh. Gated by
-    /// `manage-own-accounts` like the other account mutations.
+    /// Revoking a grant makes the next token request prompt again.
     async fn revoke_grant(
         &self,
         #[zbus(header)] header: Header<'_>,
@@ -293,9 +281,6 @@ impl AccountInterface {
 }
 
 impl AccountInterface {
-    /// Emits `Manager.AccountToggled` for this account, so a consumer watching
-    /// the daemon can react to it being enabled or disabled without diffing the
-    /// `Enabled` property.
     async fn emit_account_toggled(&self, enabled: bool) {
         let Some(connection) = crate::CONNECTION.get() else {
             return;
@@ -303,9 +288,7 @@ impl AccountInterface {
         let path = crate::manager::account_object_path(&self.id);
         if let Ok(iface) = connection
             .object_server()
-            .interface::<_, crate::manager::ManagerInterface>(
-                "/dev/edfloreshz/Accounts/Manager",
-            )
+            .interface::<_, crate::manager::ManagerInterface>("/dev/edfloreshz/Accounts/Manager")
             .await
         {
             let _ = crate::manager::ManagerInterface::account_toggled(
@@ -317,9 +300,7 @@ impl AccountInterface {
         }
     }
 
-    /// Layer-1 gate for account mutations: `manage-own-accounts` (`auth_self`).
-    /// A missing header (only possible for property writes that arrive without
-    /// one) is treated as an unidentifiable caller and denied.
+    /// Deny account mutations when the caller header is missing.
     async fn authorize_manage(&self, header: Option<&Header<'_>>) -> Result<()> {
         let authorized = match header {
             Some(header) => polkit::check(header, polkit::ACTION_MANAGE_OWN_ACCOUNTS).await,

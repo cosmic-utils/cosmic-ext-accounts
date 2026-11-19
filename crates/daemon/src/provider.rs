@@ -1,9 +1,7 @@
 use accounts_core::ProviderManifest;
 use zbus::{fdo::Result, interface};
 
-/// Read-only reflection of a loaded provider manifest, served at
-/// `/dev/edfloreshz/Accounts/Providers/<id>`. Providers are loaded once at startup and
-/// never reload at runtime, so this object never changes after registration.
+/// Exposes a provider manifest loaded at daemon startup.
 pub struct ProviderInterface {
     manifest: ProviderManifest,
 }

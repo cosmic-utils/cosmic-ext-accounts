@@ -1,10 +1,4 @@
-//! Verifies the `ProviderHandler` wire contract the daemon relies on: the
-//! `#[proxy]` in `accounts_core` and an `#[interface]` impl line up, `(identity,
-//! blob)` round-trips, `login_hint` is honoured, and a refresh call carrying the
-//! previous blob under `HANDLER_BLOB_PARAM` gets a rotated blob back.
-//!
-//! Requires a session bus (`DBUS_SESSION_BUS_ADDRESS`); run under
-//! `dbus-run-session` if none is present.
+//! ProviderHandler wire tests. Run with `dbus-run-session` if no session bus is available.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -15,9 +9,7 @@ use base64::Engine;
 
 static SEQ: AtomicU32 = AtomicU32::new(0);
 
-/// Serves `ExampleHandler` under a bus name unique to this test invocation
-/// (tests run concurrently and each owns a name). The returned connection must
-/// be kept alive for the duration of the test.
+/// Uses a unique bus name per test. Keep the returned connection alive.
 async fn serve() -> (zbus::Connection, String) {
     let name = format!(
         "dev.edfloreshz.Accounts.ProviderHandler.test.p{}s{}",

@@ -1,14 +1,4 @@
-//! Server-side resolution of a D-Bus caller's stable identity for the layer-2
-//! grant table. A self-reported id in method arguments is never trusted — the
-//! identity is derived from the bus connection's credentials.
-//!
-//! Preference order (per `grants.md`):
-//! 1. sandbox app id (Flatpak / snap) — this is what the user recognises in a
-//!    consent prompt;
-//! 2. the resolved absolute path of the process's executable, read fresh from
-//!    `/proc/<pid>/exe` every time (pids are recycled, so it is never cached);
-//! 3. otherwise unidentifiable — such a caller may be issued a one-time token
-//!    after a prompt but never gets a persisted grant.
+//! Derives grant identities from D-Bus credentials. Prefer sandbox IDs, then executable paths.
 
 use std::path::PathBuf;
 
@@ -49,6 +39,7 @@ async fn resolve_inner(connection: &zbus::Connection, header: &Header<'_>) -> Op
         });
     }
 
+    // Read the executable each time because PIDs can be reused.
     let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
     let display_name = exe
         .file_name()
@@ -60,8 +51,7 @@ async fn resolve_inner(connection: &zbus::Connection, header: &Header<'_>) -> Op
     })
 }
 
-/// Reads the Flatpak sandbox app id from `/proc/<pid>/root/.flatpak-info`
-/// (`[Application] name=`), which Flatpak writes into every sandboxed process.
+/// Reads the app ID from the sandbox's `.flatpak-info`.
 fn flatpak_app_id(pid: u32) -> Option<String> {
     let info =
         std::fs::read_to_string(PathBuf::from(format!("/proc/{pid}/root/.flatpak-info"))).ok()?;
