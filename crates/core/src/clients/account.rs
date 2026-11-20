@@ -47,6 +47,7 @@ impl AccountsClient {
 
     pub async fn request_proxy(&self, path: OwnedObjectPath) -> Result<RequestProxy<'static>> {
         let builder = RequestProxy::builder(&self.connection)
+            .cache_properties(zbus::proxy::CacheProperties::No)
             .path(path)
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         builder
@@ -194,6 +195,7 @@ impl AccountsClient {
     }
 
     /// Returns `(access_token, expires_at)` after authorization for the requested service.
+    /// The provider token may carry scopes for other services.
     pub async fn get_access_token(
         &mut self,
         id: &Uuid,

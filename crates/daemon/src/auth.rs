@@ -30,6 +30,7 @@ fn handler_credential(blob: Vec<u8>) -> Credential {
 struct PendingAuth {
     provider_id: String,
     verifier: PkceCodeVerifier,
+    redirect: RedirectUrl,
     request_id: String,
     /// Set when this flow refreshes an existing account instead of creating a new one.
     existing_account: Option<Uuid>,
@@ -55,9 +56,7 @@ impl AuthManager {
     }
 
     fn registry() -> Result<&'static ProviderRegistry> {
-        crate::REGISTRY
-            .get()
-            .ok_or(Error::InvalidProviderConfig)
+        crate::REGISTRY.get().ok_or(Error::InvalidProviderConfig)
     }
 
     fn oauth_client(manifest: &accounts_core::ProviderManifest) -> Result<BasicClient> {
@@ -67,8 +66,7 @@ impl AuthManager {
             oauth.client_secret.clone().map(ClientSecret::new),
             AuthUrl::new(oauth.auth_url.clone())?,
             Some(TokenUrl::new(oauth.token_url.clone())?),
-        )
-        .set_redirect_uri(RedirectUrl::new(oauth.redirect_uri.clone())?))
+        ))
     }
 
     pub async fn start_auth_flow(
@@ -91,7 +89,18 @@ impl AuthManager {
             });
         }
 
-        let client = Self::oauth_client(manifest)?;
+        let callback_port = *crate::CALLBACK_PORT
+            .get()
+            .ok_or(Error::InvalidProviderConfig)?;
+        let mut redirect = url::Url::parse(&manifest.oauth.redirect_uri)?;
+        if redirect.scheme() != "http"
+            || redirect.host_str() != Some("127.0.0.1")
+            || redirect.set_port(Some(callback_port)).is_err()
+        {
+            return Err(Error::InvalidProviderConfig);
+        }
+        let redirect = RedirectUrl::new(redirect.into())?;
+        let client = Self::oauth_client(manifest)?.set_redirect_uri(redirect.clone());
 
         let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
 
@@ -108,7 +117,18 @@ impl AuthManager {
         }
 
         for (key, value) in &params {
-            auth_request = auth_request.add_extra_param(key.clone(), value.clone());
+            if !matches!(
+                key.as_str(),
+                "client_id"
+                    | "response_type"
+                    | "redirect_uri"
+                    | "state"
+                    | "code_challenge"
+                    | "code_challenge_method"
+                    | "scope"
+            ) {
+                auth_request = auth_request.add_extra_param(key.clone(), value.clone());
+            }
         }
 
         let (auth_url, csrf_token) = auth_request.url();
@@ -119,6 +139,7 @@ impl AuthManager {
             PendingAuth {
                 provider_id,
                 verifier: pkce_verifier,
+                redirect,
                 request_id,
                 existing_account,
             },
@@ -155,7 +176,7 @@ impl AuthManager {
             .get(&pending.provider_id)
             .ok_or_else(|| Error::InvalidProvider(pending.provider_id.clone()))?;
 
-        let client = Self::oauth_client(manifest)?;
+        let client = Self::oauth_client(manifest)?.set_redirect_uri(pending.redirect);
 
         let token_result = client
             .exchange_code(AuthorizationCode::new(authorization_code))
@@ -184,6 +205,11 @@ impl AuthManager {
             let mut account = AccountsConfig::config()
                 .get_account(&existing_id)
                 .ok_or_else(|| Error::AccountNotFound(existing_id.to_string()))?;
+            if account.username != user_info.username {
+                return Err(Error::AuthenticationFailed {
+                    reason: "Sign in with the same account to reconnect it".to_string(),
+                });
+            }
             account.last_used = Some(Utc::now());
 
             self.storage
@@ -243,6 +269,11 @@ impl AuthManager {
             let mut account = AccountsConfig::config()
                 .get_account(&existing_id)
                 .ok_or_else(|| Error::AccountNotFound(existing_id.to_string()))?;
+            if account.username != identity {
+                return Err(Error::AuthenticationFailed {
+                    reason: "Sign in with the same account to reconnect it".to_string(),
+                });
+            }
             account.last_used = Some(Utc::now());
             self.storage
                 .set_account_credentials(&account.id, &credentials)

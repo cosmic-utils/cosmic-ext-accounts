@@ -41,15 +41,24 @@ async fn check_inner(header: &Header<'_>, action_id: &str) -> zbus::Result<bool>
     let sender = header
         .sender()
         .ok_or_else(|| zbus::Error::Failure("message has no sender".to_string()))?;
-    let dbus = zbus::fdo::DBusProxy::new(session_bus().await?).await?;
+    let session = session_bus().await?;
+    let dbus = zbus::fdo::DBusProxy::new(session).await?;
+    let owner = session
+        .unique_name()
+        .ok_or_else(|| zbus::Error::Failure("session bus connection has no name".to_string()))?;
+    let owner_uid = dbus.get_connection_unix_user(owner.into()).await?;
     let credentials = dbus
         .get_connection_credentials(zbus::names::BusName::from(sender.to_owned()))
         .await?;
+    if credentials.unix_user_id() != Some(owner_uid) {
+        return Ok(false);
+    }
+
     let pid = credentials
         .process_id()
         .ok_or_else(|| zbus::Error::Failure("caller has no pid".to_string()))?;
 
-    let subject = Subject::new_for_owner(pid, None, None)
+    let subject = Subject::new_for_owner(pid, None, Some(owner_uid))
         .map_err(|e| zbus::Error::Failure(format!("could not build polkit subject: {e}")))?;
     let authority = AuthorityProxy::new(system_bus().await?).await?;
     let result = authority

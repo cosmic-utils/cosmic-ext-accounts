@@ -69,3 +69,8 @@ about = About
 manage-online = Manage your online accounts and services
 repository = Repository
 git-description = Git commit {$hash} on {$date}
+
+reconnect-account = Reconnect this account
+sign-in-again = Sign in again
+account-reconnected = { $account } was reconnected
+accounts-load-failed = Could not load accounts. Open Accounts again to retry.

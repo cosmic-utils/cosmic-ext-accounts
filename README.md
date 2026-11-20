@@ -20,6 +20,11 @@ polkit policy. Source installs preserve existing system provider manifests. Afte
 sign out and back in so the session loads the new daemon. Open **Accounts for COSMIC**
 from your app launcher to sign in.
 
+The daemon runs on each user's session bus. Access and refresh tokens are stored in that user's
+Secret Service keyring, and grants remain in the user's profile. The broker checks the caller's Unix
+UID, polkit authorization, and app consent before issuing tokens. Each daemon uses its own loopback
+port for OAuth redirects.
+
 System provider manifests are installed under `/usr/share/accounts/providers`. For a source
 installation, copy the template you need to `${XDG_DATA_HOME:-$HOME/.local/share}/accounts/providers`
 and set the client configuration there. User overrides take precedence over the system defaults.
@@ -34,7 +39,7 @@ either location so the daemon reloads the manifests.
 On the Debian-based release you want to support, install `dpkg-dev` and set `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, and `MICROSOFT_CLIENT_ID` for distributable native desktop clients.
 Run `just package-native` to build the package under `target/native/`. The provider registrations
-must support the configured `http://127.0.0.1` loopback redirect. The package
+must accept an ephemeral port on the configured `http://127.0.0.1` loopback redirect. The package
 includes the shared desktop client configuration.
 
 ## Contributing

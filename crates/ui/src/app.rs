@@ -42,8 +42,9 @@ pub struct AppModel {
     pending_auth: Option<PendingAuth>,
 }
 
-#[derive(Default)]
 struct PendingAuth {
+    id: Uuid,
+    reconnecting: bool,
     request_path: Option<zbus::zvariant::OwnedObjectPath>,
     /// Retained so the user can reopen sign-in if the browser failed to open.
     url: Option<String>,
@@ -78,14 +79,14 @@ pub enum Message {
     AccountRemoved(Uuid, String),
 
     // Sign-in
-    StartAuth(String),
-    RequestCreated(zbus::zvariant::OwnedObjectPath),
-    AuthUrlReady(String),
+    StartAuth(String, Option<Uuid>),
+    RequestCreated(Uuid, zbus::zvariant::OwnedObjectPath),
+    AuthUrlReady(Uuid, String),
     OpenAuthUrl,
     CancelAuth,
-    AuthFailed(String),
-    AccountAdded(Uuid),
-    AccountReady(Account),
+    AuthFailed(Uuid, String),
+    AuthSucceeded(Uuid, Uuid),
+    AccountReady(Account, bool),
 }
 
 impl cosmic::Application for AppModel {
@@ -195,11 +196,11 @@ impl cosmic::Application for AppModel {
     fn on_escape(&mut self) -> cosmic::app::Task<Self::Message> {
         // Dismissing the dialog cancels the pending sign-in.
         if matches!(self.dialog_pages.front(), Some(DialogPage::SigningIn(_))) {
-            self.pending_auth = None;
+            return self.update(Message::CancelAuth);
         }
 
-        if self.dialog_pages.pop_front().is_some() {
-            return Task::none();
+        if !self.dialog_pages.is_empty() {
+            return self.update(Message::CloseDialog);
         }
 
         self.core.window.show_context = false;
@@ -273,18 +274,15 @@ impl cosmic::Application for AppModel {
             }));
         }
 
-        if let Some(path) = self
+        if let Some((id, path)) = self
             .pending_auth
             .as_ref()
-            .and_then(|pending| pending.request_path.clone())
+            .and_then(|pending| Some((pending.id, pending.request_path.clone()?)))
         {
-            subscriptions.push(Subscription::run_with(
-                path.clone(),
-                |path: &zbus::zvariant::OwnedObjectPath| {
-                    let path = path.clone();
-                    stream::channel(4, move |output| watch_request(path, output))
-                },
-            ));
+            subscriptions.push(Subscription::run_with((id, path), |(id, path)| {
+                let (id, path) = (*id, path.clone());
+                stream::channel(4, move |output| watch_request(id, path, output))
+            }));
         }
 
         Subscription::batch(subscriptions)
@@ -311,7 +309,7 @@ impl cosmic::Application for AppModel {
             }
             Message::LaunchUrl(url) => {
                 if let Err(err) = open::that_detached(&url) {
-                    tracing::error!("Failed to open {url:?}: {err}");
+                    tracing::error!("Failed to open browser: {err}");
                 }
             }
             Message::ShowToast(message) => {
@@ -366,7 +364,7 @@ impl cosmic::Application for AppModel {
                             Ok(accounts) => cosmic::action::app(Message::SetAccounts(accounts)),
                             Err(err) => {
                                 tracing::error!("Failed to list accounts: {err}");
-                                cosmic::action::none()
+                                cosmic::action::app(Message::ShowToast(fl!("accounts-load-failed")))
                             }
                         },
                     ));
@@ -561,38 +559,65 @@ impl cosmic::Application for AppModel {
                 tasks.push(self.update(Message::LoadAccounts));
             }
 
-            Message::StartAuth(provider) => {
+            Message::StartAuth(provider, existing_account) => {
+                if self.pending_auth.is_some() {
+                    return Task::none();
+                }
                 tracing::info!("Starting authentication for provider: {provider}");
 
                 let Some(mut client) = self.client.clone() else {
-                    return self.update(Message::AuthFailed(fl!("service-unavailable")));
+                    return self.update(Message::ShowToast(fl!("service-unavailable")));
                 };
 
-                self.pending_auth = Some(PendingAuth::default());
+                let attempt = Uuid::new_v4();
+                self.pending_auth = Some(PendingAuth {
+                    id: attempt,
+                    reconnecting: existing_account.is_some(),
+                    request_path: None,
+                    url: None,
+                });
                 tasks.push(
                     self.update(Message::OpenDialog(DialogPage::SigningIn(provider.clone()))),
                 );
                 tasks.push(Task::perform(
-                    async move { client.create_account(&provider).await },
-                    |result| match result {
+                    async move {
+                        if let Some(id) = existing_account {
+                            client.reauthenticate(&id).await
+                        } else {
+                            client.create_account(&provider).await
+                        }
+                    },
+                    move |result| match result {
                         Ok(proxy) => cosmic::action::app(Message::RequestCreated(
+                            attempt,
                             proxy.inner().path().to_owned().into(),
                         )),
                         Err(err) => {
                             tracing::error!("Failed to start authentication: {err}");
-                            cosmic::action::app(Message::AuthFailed(err.to_string()))
+                            cosmic::action::app(Message::AuthFailed(attempt, err.to_string()))
                         }
                     },
                 ));
             }
-            Message::RequestCreated(path) => {
-                let Some(pending) = self.pending_auth.as_mut() else {
-                    return Task::none();
-                };
-                pending.request_path = Some(path);
+            Message::RequestCreated(attempt, path) => {
+                if let Some(pending) = self
+                    .pending_auth
+                    .as_mut()
+                    .filter(|pending| pending.id == attempt)
+                {
+                    pending.request_path = Some(path);
+                } else if let Some(client) = self.client.clone() {
+                    tasks.push(Task::perform(cancel_request(client, path), |_| {
+                        cosmic::action::none()
+                    }));
+                }
             }
-            Message::AuthUrlReady(url) => {
-                let Some(pending) = self.pending_auth.as_mut() else {
+            Message::AuthUrlReady(attempt, url) => {
+                let Some(pending) = self
+                    .pending_auth
+                    .as_mut()
+                    .filter(|pending| pending.id == attempt)
+                else {
                     return Task::none();
                 };
                 // Open the browser once even if the initial read and signal report the same state.
@@ -618,19 +643,21 @@ impl cosmic::Application for AppModel {
                         .as_ref()
                         .and_then(|pending| pending.request_path.clone()),
                 ) {
-                    tasks.push(Task::perform(
-                        async move {
-                            if let Ok(proxy) = client.request_proxy(path).await {
-                                let _ = proxy.cancel().await;
-                            }
-                        },
-                        |_| cosmic::action::none(),
-                    ));
+                    tasks.push(Task::perform(cancel_request(client, path), |_| {
+                        cosmic::action::none()
+                    }));
                 }
                 self.pending_auth = None;
                 tasks.push(self.update(Message::CloseDialog));
             }
-            Message::AuthFailed(error) => {
+            Message::AuthFailed(attempt, error) => {
+                if self
+                    .pending_auth
+                    .as_ref()
+                    .is_none_or(|pending| pending.id != attempt)
+                {
+                    return Task::none();
+                }
                 self.pending_auth = None;
                 tasks.push(self.update(Message::CloseDialog));
                 tasks.push(self.update(Message::ShowToast(fl!(
@@ -638,15 +665,25 @@ impl cosmic::Application for AppModel {
                     error = error.as_str()
                 ))));
             }
-            Message::AccountAdded(id) => {
+            Message::AuthSucceeded(attempt, id) => {
+                let Some(pending) = self
+                    .pending_auth
+                    .as_ref()
+                    .filter(|pending| pending.id == attempt)
+                else {
+                    return Task::none();
+                };
+                let reconnecting = pending.reconnecting;
                 self.pending_auth = None;
                 tasks.push(self.update(Message::CloseDialog));
 
                 if let Some(client) = self.client.clone() {
                     tasks.push(Task::perform(
                         async move { client.get_account(&id).await },
-                        |account| match account {
-                            Ok(account) => cosmic::action::app(Message::AccountReady(account)),
+                        move |account| match account {
+                            Ok(account) => {
+                                cosmic::action::app(Message::AccountReady(account, reconnecting))
+                            }
                             Err(err) => {
                                 tracing::error!("Failed to load the new account: {err}");
                                 cosmic::action::none()
@@ -656,13 +693,15 @@ impl cosmic::Application for AppModel {
                 }
                 tasks.push(self.update(Message::LoadAccounts));
             }
-            Message::AccountReady(account) => {
+            Message::AccountReady(account, reconnecting) => {
                 let label = self.account_label(&account);
                 tasks.push(self.update(Message::SelectAccount(account)));
-                tasks.push(self.update(Message::ShowToast(fl!(
-                    "account-added",
-                    account = label.as_str()
-                ))));
+                let message = if reconnecting {
+                    fl!("account-reconnected", account = label.as_str())
+                } else {
+                    fl!("account-added", account = label.as_str())
+                };
+                tasks.push(self.update(Message::ShowToast(message)));
             }
         }
 
@@ -732,13 +771,7 @@ async fn watch_daemon_signal(signal: &'static str, output: Sender<Message>) {
 
     match signal {
         ACCOUNT_ADDED => match client.receive_account_added().await {
-            Ok(stream) => {
-                forward(stream, output, |signal| {
-                    let args = signal.args().ok()?;
-                    account_id_from_path(args.account()).map(Message::AccountAdded)
-                })
-                .await;
-            }
+            Ok(stream) => forward(stream, output, |_| Some(Message::LoadAccounts)).await,
             Err(err) => tracing::error!("Failed to watch for {signal}: {err}"),
         },
         ACCOUNT_REMOVED => match client.receive_account_removed().await {
@@ -749,43 +782,73 @@ async fn watch_daemon_signal(signal: &'static str, output: Sender<Message>) {
     }
 }
 
-async fn watch_request(path: zbus::zvariant::OwnedObjectPath, mut output: Sender<Message>) {
+async fn cancel_request(client: AccountsClient, path: zbus::zvariant::OwnedObjectPath) {
+    if let Ok(proxy) = client.request_proxy(path).await {
+        let _ = proxy.cancel().await;
+    }
+}
+
+async fn watch_request(
+    attempt: Uuid,
+    path: zbus::zvariant::OwnedObjectPath,
+    mut output: Sender<Message>,
+) {
     let Ok(client) = AccountsClient::new().await else {
         tracing::error!("Failed to connect to the daemon to watch the sign-in request");
+        let _ = output
+            .send(Message::AuthFailed(attempt, fl!("service-unavailable")))
+            .await;
         return;
     };
     let Ok(proxy) = client.request_proxy(path).await else {
         tracing::error!("Failed to reach the sign-in request object");
+        let _ = output
+            .send(Message::AuthFailed(attempt, fl!("service-unavailable")))
+            .await;
         return;
     };
-
-    if emit_request_state(&proxy, &mut output).await.is_break() {
-        return;
-    }
 
     let Ok(mut changes) = proxy.receive_request_status_changed().await else {
         tracing::error!("Failed to watch the sign-in request for status changes");
+        let _ = output
+            .send(Message::AuthFailed(attempt, fl!("service-unavailable")))
+            .await;
         return;
     };
 
-    while changes.next().await.is_some() {
-        if emit_request_state(&proxy, &mut output).await.is_break() {
-            break;
+    loop {
+        if emit_request_state(attempt, &proxy, &mut output)
+            .await
+            .is_break()
+        {
+            return;
+        }
+        if changes.next().await.is_none() {
+            let _ = output
+                .send(Message::AuthFailed(attempt, fl!("service-unavailable")))
+                .await;
+            return;
         }
     }
 }
 
 async fn emit_request_state(
+    attempt: Uuid,
     proxy: &accounts_core::proxy::RequestProxy<'static>,
     output: &mut Sender<Message>,
 ) -> std::ops::ControlFlow<()> {
-    let status = proxy.status().await.unwrap_or_default();
+    let Ok(status) = proxy.status().await else {
+        let _ = output
+            .send(Message::AuthFailed(attempt, fl!("service-unavailable")))
+            .await;
+        return std::ops::ControlFlow::Break(());
+    };
     match status.as_str() {
         "needs-interaction" => {
             if let Ok(uri) = proxy.interaction_uri().await
                 && !uri.is_empty()
             {
-                let _ = output.send(Message::AuthUrlReady(uri)).await;
+                let _ = output.send(Message::AuthUrlReady(attempt, uri)).await;
             }
             std::ops::ControlFlow::Continue(())
         }
@@ -793,13 +856,13 @@ async fn emit_request_state(
             if let Ok(account_path) = proxy.account().await
                 && let Some(id) = account_id_from_path(&account_path)
             {
-                let _ = output.send(Message::AccountAdded(id)).await;
+                let _ = output.send(Message::AuthSucceeded(attempt, id)).await;
             }
             std::ops::ControlFlow::Break(())
         }
         "failed" => {
             let reason = proxy.error_message().await.unwrap_or_default();
-            let _ = output.send(Message::AuthFailed(reason)).await;
+            let _ = output.send(Message::AuthFailed(attempt, reason)).await;
             std::ops::ControlFlow::Break(())
         }
         "cancelled" => std::ops::ControlFlow::Break(()),

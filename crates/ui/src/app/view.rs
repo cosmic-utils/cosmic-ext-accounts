@@ -131,6 +131,12 @@ impl AppModel {
                     .description(fl!("account-enabled-description"))
                     .toggler(account.enabled, Message::SetAccountEnabled),
             )
+            .add(
+                widget::settings::item::builder(fl!("reconnect-account")).control(
+                    widget::button::standard(fl!("sign-in-again"))
+                        .on_press(Message::StartAuth(account.provider.clone(), Some(account.id))),
+                ),
+            )
             .into()
     }
 
@@ -247,7 +253,7 @@ impl AppModel {
                     .padding([spacing().space_s, spacing().space_m])
                     .width(Length::Fill)
                     .name(provider.name.clone())
-                    .on_press(Message::StartAuth(provider.id.clone()))
+                    .on_press(Message::StartAuth(provider.id.clone(), None))
                     .into()
             })
             .collect();

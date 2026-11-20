@@ -177,10 +177,14 @@ impl ProviderRegistry {
     pub fn search_dirs() -> Vec<PathBuf> {
         let mut dirs = Vec::new();
 
-        if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
-            dirs.push(PathBuf::from(data_home).join("accounts/providers"));
-        } else if let Ok(home) = std::env::var("HOME") {
-            dirs.push(PathBuf::from(home).join(".local/share/accounts/providers"));
+        let data_home = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+            });
+        if let Some(data_home) = data_home {
+            dirs.push(data_home.join("accounts/providers"));
         }
 
         if let Ok(data_dirs) = std::env::var("XDG_DATA_DIRS") {

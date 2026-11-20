@@ -34,6 +34,8 @@ use zbus::Connection;
 /// Accounts whose next token request must force a refresh.
 type StaleTokens = Arc<Mutex<HashSet<Uuid>>>;
 
+static CALLBACK_PORT: OnceCell<u16> = OnceCell::const_new();
+
 pub static CONNECTION: OnceCell<Connection> = OnceCell::const_new();
 pub static REGISTRY: OnceCell<ProviderRegistry> = OnceCell::const_new();
 pub static CONFIG: OnceCell<Arc<Mutex<AccountsConfig>>> = OnceCell::const_new();
@@ -42,8 +44,6 @@ pub static STALE: OnceCell<StaleTokens> = OnceCell::const_new();
 /// Live sign-in requests keyed by request ID.
 pub static REQUESTS: OnceCell<Arc<Mutex<HashMap<String, SharedRequestState>>>> =
     OnceCell::const_new();
-
-const CALLBACK_PORT: u16 = 49173;
 
 pub async fn run() -> Result<()> {
     info!("Starting Accounts for COSMIC daemon...");
@@ -60,6 +60,11 @@ pub async fn run() -> Result<()> {
         .expect("requests registry set once at startup");
 
     info!("Setting up D-Bus connection...");
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+    CALLBACK_PORT
+        .set(listener.local_addr()?.port())
+        .expect("callback port set once at startup");
 
     let config = Arc::new(Mutex::new(AccountsConfig::config()));
     let auth_manager = Arc::new(Mutex::new(
@@ -130,10 +135,6 @@ pub async fn run() -> Result<()> {
     info!("D-Bus service started on: dev.edfloreshz.Accounts");
     info!("Object path: /dev/edfloreshz/Accounts");
 
-    let listener = TcpListener::bind(("127.0.0.1", CALLBACK_PORT))
-        .await
-        .map_err(Error::Io)?;
-    info!("OAuth callback listener on http://127.0.0.1:{CALLBACK_PORT}/callback");
     tokio::spawn(run_callback_server(
         listener,
         config.clone(),
@@ -161,7 +162,9 @@ async fn run_callback_server(
         };
 
         let mut buf = [0u8; 8192];
-        let Ok(n) = stream.read(&mut buf).await else {
+        let Ok(Ok(n)) =
+            tokio::time::timeout(std::time::Duration::from_secs(2), stream.read(&mut buf)).await
+        else {
             continue;
         };
 
@@ -216,7 +219,7 @@ async fn complete_from_query(
         }
     }
 
-    info!(?code, ?state, ?error, "Received OAuth redirect");
+    info!("Received OAuth redirect");
 
     let Some(connection) = CONNECTION.get() else {
         tracing::error!("D-Bus connection not available for the OAuth callback");
@@ -241,17 +244,25 @@ async fn complete_from_query(
         return;
     };
 
-    let completed = {
+    let (request_id, completed) = {
         let mut auth_manager = auth_manager.lock().await;
-        auth_manager
+        let request_id = auth_manager.request_id_for_csrf(&csrf_token);
+        let completed = auth_manager
             .complete_auth_flow(csrf_token, authorization_code)
-            .await
+            .await;
+        (request_id, completed)
     };
 
     let completed = match completed {
         Ok(completed) => completed,
         Err(err) => {
             tracing::error!("Failed to authenticate user: {err}");
+            if let Some(request_id) = request_id {
+                let state = requests.lock().await.get(&request_id).cloned();
+                if let Some(state) = state {
+                    manager::fail_request(connection, &request_id, &state, err.to_string()).await;
+                }
+            }
             return;
         }
     };
@@ -296,11 +307,18 @@ pub(crate) async fn finalize_completed_auth(
     };
 
     if existing_account.is_some() {
-        {
+        let persisted = {
             let mut config = config.lock().await;
-            if let Err(err) = config.save_account(&account) {
-                tracing::error!("Failed to persist refreshed account: {err}");
+            if let Some(mut current) = config.get_account(&account.id) {
+                current.last_used = account.last_used;
+                config.save_account(&current).map_err(|err| err.to_string())
+            } else {
+                Err("This account was removed while it was reconnecting".to_string())
             }
+        };
+        if let Err(reason) = persisted {
+            manager::fail_request(connection, &request_id, &state, reason).await;
+            return;
         }
         stale.lock().await.remove(&account.id);
         let path = manager::account_object_path(&account.id);
