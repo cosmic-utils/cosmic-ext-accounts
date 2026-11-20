@@ -36,12 +36,34 @@ impl Decision {
 
 /// Maps service names and aliases to grant table keys.
 pub fn normalize_service(value: &str) -> Option<&'static str> {
-    match value.to_lowercase().as_str() {
-        "mail" | "email" => Some("mail"),
-        "calendar" => Some("calendar"),
-        "contacts" => Some("contacts"),
-        "tasks" | "todo" => Some("tasks"),
-        _ => None,
+    use accounts_core::models::Service;
+
+    Some(match Service::from_str(value.to_owned())? {
+        Service::Email => "mail",
+        Service::Calendar => "calendar",
+        Service::Contacts => "contacts",
+        Service::Tasks => "tasks",
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_service;
+    use accounts_core::models::Service;
+
+    #[test]
+    fn grant_keys_parse_as_the_service_used_for_authorization() {
+        for (name, expected) in [
+            ("Email", Service::Email),
+            ("Mail", Service::Email),
+            ("Calendar", Service::Calendar),
+            ("Contacts", Service::Contacts),
+            ("Tasks", Service::Tasks),
+            ("Todo", Service::Tasks),
+        ] {
+            let key = normalize_service(name).unwrap();
+            assert_eq!(Service::from_str(key.to_owned()), Some(expected));
+        }
     }
 }
 

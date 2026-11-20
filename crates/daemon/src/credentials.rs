@@ -3,7 +3,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use accounts_core::config::AccountsConfig;
+use accounts_core::{
+    config::AccountsConfig,
+    models::{Account, Service},
+};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use zbus::{fdo::Result, interface, message::Header};
@@ -44,11 +47,23 @@ impl CredentialsInterface {
         }
     }
 
-    async fn current(&self) -> std::result::Result<accounts_core::models::Account, Error> {
-        let config = self.config.lock().await;
-        config
+    async fn enabled_account(&self, service: &Service) -> std::result::Result<Account, TokenError> {
+        let account = self
+            .config
+            .lock()
+            .await
             .get_account(&self.id)
-            .ok_or_else(|| Error::AccountNotFound(self.id.to_string()))
+            .ok_or_else(|| {
+                TokenError::Failed(Error::AccountNotFound(self.id.to_string()).to_string())
+            })?;
+
+        if !account.enabled || account.services.get(service) != Some(&true) {
+            return Err(TokenError::Disabled(format!(
+                "{} is disabled for account {}",
+                service, self.id
+            )));
+        }
+        Ok(account)
     }
 }
 
@@ -56,7 +71,7 @@ impl CredentialsInterface {
 impl CredentialsInterface {
     #[zbus(property)]
     async fn auth_method(&self) -> Result<String> {
-        Ok("oauth2".to_string())
+        Ok("oauth2".into())
     }
 
     async fn get_access_token(
@@ -65,6 +80,45 @@ impl CredentialsInterface {
         #[zbus(connection)] connection: &zbus::Connection,
         service: &str,
     ) -> std::result::Result<(String, i64), TokenError> {
+        self.issue_access_token(header, connection, service, false)
+            .await
+    }
+
+    async fn get_mail_access(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &zbus::Connection,
+    ) -> std::result::Result<(accounts_core::proxy::MailConnectionSettings, String, i64), TokenError>
+    {
+        let account = self.enabled_account(&Service::Email).await?;
+        let settings = crate::services::mail_settings(&account)
+            .map_err(|err| TokenError::Disabled(err.to_string()))?;
+        let (token, expiry) = self
+            .issue_access_token(header, connection, "Email", true)
+            .await?;
+        Ok((settings, token, expiry))
+    }
+
+    /// Force a refresh on the next token request after a provider returns 401.
+    async fn invalidate_token(&self, #[zbus(header)] header: Header<'_>) -> Result<()> {
+        if !polkit::check(&header, polkit::ACTION_GET_TOKEN).await {
+            return Err(zbus::fdo::Error::AccessDenied(format!(
+                "polkit denied {}",
+                polkit::ACTION_GET_TOKEN
+            )));
+        }
+        self.stale.lock().await.insert(self.id);
+        Ok(())
+    }
+}
+
+impl CredentialsInterface {
+    async fn authorize(
+        &self,
+        header: Header<'_>,
+        connection: &zbus::Connection,
+        service: &str,
+    ) -> std::result::Result<Account, TokenError> {
         if !polkit::check(&header, polkit::ACTION_GET_TOKEN).await {
             return Err(TokenError::AccessDenied(format!(
                 "polkit denied {}",
@@ -76,17 +130,9 @@ impl CredentialsInterface {
             return Err(TokenError::Failed(format!("unknown service {service:?}")));
         };
 
-        let mut account = self
-            .current()
-            .await
-            .map_err(|e| TokenError::Failed(e.to_string()))?;
-
-        if !account.enabled {
-            return Err(TokenError::Disabled(format!(
-                "Account {} is disabled",
-                self.id
-            )));
-        }
+        let account_service = Service::from_str(service.to_owned())
+            .ok_or_else(|| TokenError::Failed(format!("unknown service {service:?}")))?;
+        let account = self.enabled_account(&account_service).await?;
 
         let who = caller::resolve(connection, &header).await;
         match who.identity.as_deref() {
@@ -141,12 +187,28 @@ impl CredentialsInterface {
             }
         }
 
+        self.enabled_account(&account_service).await
+    }
+
+    async fn issue_access_token(
+        &self,
+        header: Header<'_>,
+        connection: &zbus::Connection,
+        service: &str,
+        oauth_only: bool,
+    ) -> std::result::Result<(String, i64), TokenError> {
+        let mut account = self.authorize(header, connection, service).await?;
         let force_refresh = self.stale.lock().await.remove(&self.id);
         let mut auth_manager = self.auth_manager.lock().await;
 
         if let Ok(credential) = auth_manager.get_account_credentials(&self.id).await
             && credential.token_type == "handler"
         {
+            if oauth_only {
+                return Err(TokenError::NeedsReauth(
+                    "Reconnect the account to obtain an OAuth token".into(),
+                ));
+            }
             let credential = if force_refresh {
                 auth_manager
                     .refresh_handler_credentials(&self.id)
@@ -183,20 +245,6 @@ impl CredentialsInterface {
         Ok((credential.access_token, expires_at))
     }
 
-    /// Force a refresh on the next token request after a provider returns 401.
-    async fn invalidate_token(&self, #[zbus(header)] header: Header<'_>) -> Result<()> {
-        if !polkit::check(&header, polkit::ACTION_GET_TOKEN).await {
-            return Err(zbus::fdo::Error::AccessDenied(format!(
-                "polkit denied {}",
-                polkit::ACTION_GET_TOKEN
-            )));
-        }
-        self.stale.lock().await.insert(self.id);
-        Ok(())
-    }
-}
-
-impl CredentialsInterface {
     async fn ask(
         &self,
         connection: &zbus::Connection,

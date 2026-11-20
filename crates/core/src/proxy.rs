@@ -122,6 +122,9 @@ pub trait Credentials {
     /// Returns the access token and expiry in Unix seconds (0 if unavailable).
     async fn get_access_token(&self, service: &str) -> Result<(String, i64)>;
 
+    /// Returns the validated settings, access token, and expiry for IMAP/SMTP.
+    async fn get_mail_access(&self) -> Result<(MailConnectionSettings, String, i64)>;
+
     async fn invalidate_token(&self) -> Result<()>;
 }
 
@@ -182,11 +185,25 @@ pub trait Contacts {
     fn auth_method(&self) -> Result<String>;
 }
 
+/// Mail transport settings in the order used by the D-Bus wire format.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, zbus::zvariant::Type)]
+pub struct MailConnectionSettings {
+    pub imap_host: String,
+    pub imap_port: u16,
+    pub imap_tls: String,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_tls: String,
+    pub authentication: String,
+}
+
 #[proxy(
     interface = "dev.edfloreshz.Accounts.Endpoint.Mail",
     default_service = "dev.edfloreshz.Accounts"
 )]
 pub trait Mail {
+    async fn get_connection_settings(&self) -> Result<MailConnectionSettings>;
+
     #[zbus(property)]
     fn imap_host(&self) -> Result<String>;
     #[zbus(property)]

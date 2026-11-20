@@ -75,6 +75,11 @@ impl ManagerInterface {
         Ok(env!("CARGO_PKG_VERSION").to_string())
     }
 
+    #[zbus(property)]
+    fn mail_endpoint_version(&self) -> u32 {
+        1
+    }
+
     async fn create_account(
         &self,
         provider_id: &str,

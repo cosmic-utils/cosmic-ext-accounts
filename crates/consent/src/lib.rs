@@ -154,6 +154,11 @@ impl cosmic::Application for Prompt {
 
         let p = &self.params;
 
+        let description = format!(
+            "{} wants to use {} with this {} account. The provider may grant the app access to other services on the same account.",
+            p.caller_name, p.service, p.provider_id,
+        );
+
         let content = widget::Column::new()
             .spacing(12)
             .width(Length::Fill)
@@ -161,10 +166,7 @@ impl cosmic::Application for Prompt {
                 "Allow access to \u{201c}{}\u{201d}?",
                 p.account_name
             )))
-            .push(widget::text::body(format!(
-                "{} wants to use this account\u{2019}s {} credentials ({}).",
-                p.caller_name, p.service, p.provider_id
-            )));
+            .push(widget::text::body(description));
 
         let actions = widget::Row::new()
             .spacing(8)

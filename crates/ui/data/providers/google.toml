@@ -41,5 +41,7 @@ uri_template = "https://tasks.googleapis.com/tasks/v1/"
 [endpoint.mail]
 imap_host = "imap.gmail.com"
 imap_port = 993
+imap_tls = "tls"
 smtp_host = "smtp.gmail.com"
 smtp_port = 587
+smtp_tls = "starttls"

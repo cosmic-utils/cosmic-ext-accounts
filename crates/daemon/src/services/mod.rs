@@ -56,10 +56,10 @@ impl ServiceFactory {
             services.push(Box::new(CalendarService::new(account.clone())));
         }
 
-        if let Some((_, value)) = account.services.get_key_value(&Service::Email)
-            && *value
+        if account.services.get(&Service::Email) == Some(&true)
+            && let Some(mail) = Self::create_service(account, &Service::Email)
         {
-            services.push(Box::new(MailService::new(account.clone())));
+            services.push(mail);
         }
 
         if let Some((_, value)) = account.services.get_key_value(&Service::Tasks)
@@ -80,7 +80,10 @@ impl ServiceFactory {
     pub fn create_service(account: &Account, service: &Service) -> Option<Box<dyn AccountService>> {
         match service {
             Service::Calendar => Some(Box::new(CalendarService::new(account.clone()))),
-            Service::Email => Some(Box::new(MailService::new(account.clone()))),
+            Service::Email if has_mail_endpoint(account) => {
+                Some(Box::new(MailService::new(account.clone())))
+            }
+            Service::Email => None,
             Service::Tasks => Some(Box::new(TasksService::new(account.clone()))),
             Service::Contacts => Some(Box::new(ContactsService::new(account.clone()))),
         }

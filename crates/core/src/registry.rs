@@ -66,9 +66,39 @@ pub struct MailEndpointManifest {
     pub imap_host: String,
     #[serde(default = "default_imap_port")]
     pub imap_port: u16,
+    #[serde(default)]
+    pub imap_tls: MailTls,
     pub smtp_host: String,
     #[serde(default = "default_smtp_port")]
     pub smtp_port: u16,
+    pub smtp_tls: Option<MailTls>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum MailTls {
+    #[default]
+    Tls,
+    Starttls,
+}
+
+impl MailTls {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Tls => "tls",
+            Self::Starttls => "starttls",
+        }
+    }
+}
+
+impl MailEndpointManifest {
+    pub fn smtp_tls(&self) -> MailTls {
+        self.smtp_tls.unwrap_or(if self.smtp_port == 465 {
+            MailTls::Tls
+        } else {
+            MailTls::Starttls
+        })
+    }
 }
 
 fn default_imap_port() -> u16 {

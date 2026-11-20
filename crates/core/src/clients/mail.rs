@@ -1,4 +1,7 @@
-use crate::{models::Account, proxy::MailProxy};
+use crate::{
+    models::Account,
+    proxy::{MailConnectionSettings, MailProxy},
+};
 use zbus::{Connection, fdo::Result};
 
 #[derive(Debug, Clone)]
@@ -19,6 +22,10 @@ impl MailClient {
             proxy,
             account: account.clone(),
         })
+    }
+
+    pub async fn connection_settings(&self) -> Result<MailConnectionSettings> {
+        self.proxy.get_connection_settings().await
     }
 
     pub async fn imap_host(&self) -> Result<String> {

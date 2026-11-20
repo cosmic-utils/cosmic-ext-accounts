@@ -42,6 +42,13 @@ Run `just package-native` to build the package under `target/native/`. The provi
 must accept an ephemeral port on the configured `http://127.0.0.1` loopback redirect. The package
 includes the shared desktop client configuration.
 
+## Mail clients
+
+Mail clients can discover supported transports through `Endpoint.Mail.GetConnectionSettings`.
+`Credentials.GetMailAccess` applies the account's Email grant and returns the current, validated
+connection settings with an OAuth token for Gmail. The Google provider manifest declares the endpoints and TLS modes. The Microsoft provider's Graph credentials
+remain available through the generic credential API.
+
 ## Contributing
 
 Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).

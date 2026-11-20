@@ -26,7 +26,7 @@ pub enum DbusService {
 impl Service {
     pub fn from_str(value: String) -> Option<Self> {
         match value.to_lowercase().as_str() {
-            "email" => Some(Service::Email),
+            "email" | "mail" => Some(Service::Email),
             "calendar" => Some(Service::Calendar),
             "contacts" => Some(Service::Contacts),
             "tasks" | "todo" => Some(Service::Tasks),
