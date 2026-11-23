@@ -43,5 +43,6 @@ fn main() -> cosmic::iced::Result {
                 .min_height(360.0),
         );
 
-    cosmic::app::run::<app::AppModel>(settings, ())
+    let add_account = mode.as_deref() == Some(std::ffi::OsStr::new("--add-account"));
+    cosmic::app::run::<app::AppModel>(settings, add_account)
 }

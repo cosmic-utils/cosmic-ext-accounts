@@ -103,7 +103,7 @@ pub enum Message {
 impl cosmic::Application for AppModel {
     type Executor = cosmic::executor::Default;
 
-    type Flags = ();
+    type Flags = bool;
 
     type Message = Message;
 
@@ -119,7 +119,7 @@ impl cosmic::Application for AppModel {
 
     fn init(
         core: cosmic::Core,
-        _flags: Self::Flags,
+        add_account: Self::Flags,
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
         let mut app = AppModel {
             core,
@@ -141,10 +141,14 @@ impl cosmic::Application for AppModel {
             mail_error: None,
         };
 
-        let tasks = vec![
+        let mut tasks = vec![
             app.update_title(),
             cosmic::task::message(Message::CreateClient),
         ];
+
+        if add_account {
+            tasks.push(app.update(Message::OpenDialog(DialogPage::AddAccount)));
+        }
 
         (app, Task::batch(tasks))
     }
