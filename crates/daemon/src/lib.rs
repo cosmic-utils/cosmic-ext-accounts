@@ -335,10 +335,31 @@ pub(crate) async fn finalize_completed_auth(
         }
     }
 
-    let path = manager::account_object_path(&account.id);
+    match register_new_account(connection, config, auth_manager, grants, stale, &account).await {
+        Ok(path) => manager::succeed_request(connection, &request_id, &state, path).await,
+        Err(err) => {
+            let _ = config.lock().await.remove_account(&account.id);
+            let _ = auth_manager
+                .lock()
+                .await
+                .delete_credentials(&account.id)
+                .await;
+            manager::fail_request(connection, &request_id, &state, err.to_string()).await;
+        }
+    }
+}
 
-    if let Err(err) = connection
-        .object_server()
+pub(crate) async fn register_new_account(
+    connection: &Connection,
+    config: &Arc<Mutex<AccountsConfig>>,
+    auth_manager: &Arc<Mutex<auth::AuthManager>>,
+    grants: &GrantStore,
+    stale: &StaleTokens,
+    account: &accounts_core::models::Account,
+) -> zbus::fdo::Result<zbus::zvariant::OwnedObjectPath> {
+    let path = manager::account_object_path(&account.id);
+    let objects = connection.object_server();
+    objects
         .at(
             path.clone(),
             AccountInterface::new(
@@ -348,43 +369,43 @@ pub(crate) async fn finalize_completed_auth(
                 grants.clone(),
             ),
         )
-        .await
-    {
-        tracing::error!("Failed to register account object: {err}");
-    }
-
-    if let Err(err) = connection
-        .object_server()
-        .at(
-            path.clone(),
-            CredentialsInterface::new(
-                account.id,
-                config.clone(),
-                auth_manager.clone(),
-                grants.clone(),
-                stale.clone(),
-            ),
-        )
-        .await
-    {
-        tracing::error!("Failed to register credentials object: {err}");
-    }
-
-    for service in ServiceFactory::create_services(&account) {
-        if let Err(err) = service.add_service().await {
-            tracing::error!("Failed to add service: {err}");
+        .await?;
+    let registration: zbus::fdo::Result<()> = async {
+        objects
+            .at(
+                path.clone(),
+                CredentialsInterface::new(
+                    account.id,
+                    config.clone(),
+                    auth_manager.clone(),
+                    grants.clone(),
+                    stale.clone(),
+                ),
+            )
+            .await?;
+        for service in ServiceFactory::create_services(account) {
+            service.add_service().await?;
         }
+        Ok(())
     }
-
-    if let Ok(iface_ref) = connection
-        .object_server()
+    .await;
+    if let Err(err) = registration {
+        for service in ServiceFactory::create_services(account) {
+            let _ = service.remove_service().await;
+        }
+        let _ = objects
+            .remove::<CredentialsInterface, _>(path.clone())
+            .await;
+        let _ = objects.remove::<AccountInterface, _>(path.clone()).await;
+        return Err(err);
+    }
+    if let Ok(manager) = objects
         .interface::<_, ManagerInterface>("/dev/edfloreshz/Accounts/Manager")
         .await
     {
-        let _ = ManagerInterface::account_added(iface_ref.signal_emitter(), path.clone()).await;
+        let _ = ManagerInterface::account_added(manager.signal_emitter(), path.clone()).await;
     }
-
-    manager::succeed_request(connection, &request_id, &state, path).await;
+    Ok(path)
 }
 
 async fn fail_by_csrf(

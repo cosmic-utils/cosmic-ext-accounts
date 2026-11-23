@@ -7,6 +7,17 @@ use zbus::zvariant::{DeserializeDict, SerializeDict, Type};
 
 use crate::models::{Provider, Service};
 
+pub const CUSTOM_MAIL_PROVIDER: &str = "custom-mail";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Type)]
+pub struct CustomMailSettings {
+    pub imap_host: String,
+    pub imap_port: u16,
+    pub smtp_host: String,
+    pub smtp_port: u16,
+    pub smtp_starttls: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Account {
     pub id: Uuid,
@@ -18,6 +29,8 @@ pub struct Account {
     pub created_at: DateTime<Utc>,
     pub last_used: Option<DateTime<Utc>>,
     pub services: BTreeMap<Service, bool>,
+    #[serde(default)]
+    pub custom_mail: Option<CustomMailSettings>,
 }
 
 impl Account {
@@ -100,6 +113,7 @@ impl From<DbusAccount> for Account {
                 .last_used
                 .map(|lu| DateTime::from_str(&lu).ok())
                 .unwrap(),
+            custom_mail: None,
             services: value
                 .services
                 .into_iter()

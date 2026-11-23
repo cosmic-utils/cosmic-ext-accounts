@@ -74,3 +74,17 @@ reconnect-account = Reconnect this account
 sign-in-again = Sign in again
 account-reconnected = { $account } was reconnected
 accounts-load-failed = Could not load accounts. Open Accounts again to retry.
+
+custom-mail-title = Custom IMAP/SMTP
+custom-mail-email = Email address
+custom-mail-username = Username (optional, defaults to email)
+custom-mail-host = Hostname
+custom-mail-port = Port
+custom-mail-imap = Incoming mail · IMAP over TLS
+custom-mail-smtp = Outgoing mail · SMTP over TLS
+custom-mail-starttls = Use STARTTLS for SMTP
+custom-mail-password = Password or app password
+custom-mail-save = Save
+custom-mail-invalid-port = Enter server ports between 1 and 65535.
+custom-mail-update-password = Update mail password
+custom-mail-password-saved = Mail password updated

@@ -3,7 +3,7 @@
 use crate::app::{AppModel, Message};
 use crate::fl;
 use accounts_core::Local;
-use accounts_core::models::{Account, IconSource, Service};
+use accounts_core::models::{Account, CUSTOM_MAIL_PROVIDER, IconSource, Service};
 use chrono::{DateTime, Utc};
 use cosmic::iced::alignment::Horizontal;
 use cosmic::iced::{Alignment, Length};
@@ -21,7 +21,7 @@ const PICKER_WIDTH: f32 = 360.0;
 
 impl AppModel {
     pub(super) fn welcome_view(&self) -> Element<'_, Message> {
-        if self.providers.is_empty() {
+        if self.client.is_none() {
             return self.empty_state(
                 "dialog-warning-symbolic",
                 fl!("no-account-providers"),
@@ -124,6 +124,20 @@ impl AppModel {
     }
 
     fn account_section<'a>(&self, account: &'a Account) -> Element<'a, Message> {
+        let custom = account.provider == accounts_core::models::CUSTOM_MAIL_PROVIDER;
+        let (label, action, message) = if custom {
+            (
+                fl!("custom-mail-update-password"),
+                fl!("custom-mail-update-password"),
+                Message::OpenDialog(super::DialogPage::CustomMail(Some(account.id))),
+            )
+        } else {
+            (
+                fl!("reconnect-account"),
+                fl!("sign-in-again"),
+                Message::StartAuth(account.provider.clone(), Some(account.id)),
+            )
+        };
         widget::settings::section()
             .title(fl!("account"))
             .add(
@@ -132,10 +146,8 @@ impl AppModel {
                     .toggler(account.enabled, Message::SetAccountEnabled),
             )
             .add(
-                widget::settings::item::builder(fl!("reconnect-account")).control(
-                    widget::button::standard(fl!("sign-in-again"))
-                        .on_press(Message::StartAuth(account.provider.clone(), Some(account.id))),
-                ),
+                widget::settings::item::builder(label)
+                    .control(widget::button::standard(action).on_press(message)),
             )
             .into()
     }
@@ -208,7 +220,7 @@ impl AppModel {
     }
 
     fn details_section<'a>(&self, account: &'a Account) -> Element<'a, Message> {
-        widget::settings::section()
+        let mut section = widget::settings::section()
             .title(fl!("details"))
             .add(widget::settings::flex_item(
                 fl!("provider"),
@@ -226,20 +238,24 @@ impl AppModel {
                         .map(format_timestamp)
                         .unwrap_or_else(|| fl!("no-usage")),
                 ),
-            ))
-            .into()
+            ));
+        if let Some(settings) = &account.custom_mail {
+            section = section
+                .add(widget::settings::flex_item(
+                    fl!("custom-mail-imap"),
+                    widget::text::body(format!("{}:{}", settings.imap_host, settings.imap_port)),
+                ))
+                .add(widget::settings::flex_item(
+                    fl!("custom-mail-smtp"),
+                    widget::text::body(format!("{}:{}", settings.smtp_host, settings.smtp_port)),
+                ));
+        }
+        section.into()
     }
 
     /// Shared by the welcome screen and add-account dialog.
     pub(super) fn provider_list(&self) -> Element<'_, Message> {
-        if self.providers.is_empty() {
-            return widget::text::body(fl!("no-account-providers"))
-                .align_x(Horizontal::Center)
-                .width(Length::Fill)
-                .into();
-        }
-
-        let rows: Vec<Element<'_, Message>> = self
+        let mut rows: Vec<Element<'_, Message>> = self
             .providers
             .iter()
             .map(|provider| {
@@ -258,6 +274,10 @@ impl AppModel {
             })
             .collect();
 
+        rows.push(widget::button::standard(fl!("custom-mail-title"))
+            .width(Length::Fill)
+            .on_press(Message::OpenDialog(super::DialogPage::CustomMail(None)))
+            .into());
         widget::Column::with_children(rows)
             .spacing(spacing().space_xs)
             .width(Length::Fill)
@@ -265,6 +285,9 @@ impl AppModel {
     }
 
     pub(super) fn provider_name(&self, provider_id: &str) -> String {
+        if provider_id == CUSTOM_MAIL_PROVIDER {
+            return fl!("custom-mail-title");
+        }
         self.providers
             .iter()
             .find(|provider| provider.id == provider_id)

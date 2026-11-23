@@ -57,10 +57,26 @@ pub(crate) fn mail_endpoint(account: &Account) -> Result<&'static MailEndpointMa
 }
 
 pub(crate) fn has_mail_endpoint(account: &Account) -> bool {
-    mail_endpoint(account).is_ok()
+    account.custom_mail.is_some() || mail_endpoint(account).is_ok()
 }
 
 pub(crate) fn mail_settings(account: &Account) -> Result<MailConnectionSettings> {
+    if let Some(settings) = &account.custom_mail {
+        return Ok(MailConnectionSettings {
+            imap_host: settings.imap_host.clone(),
+            imap_port: settings.imap_port,
+            imap_tls: "tls".into(),
+            smtp_host: settings.smtp_host.clone(),
+            smtp_port: settings.smtp_port,
+            smtp_tls: if settings.smtp_starttls {
+                "starttls"
+            } else {
+                "tls"
+            }
+            .into(),
+            authentication: "password".into(),
+        });
+    }
     let endpoint = mail_endpoint(account)?;
     Ok(MailConnectionSettings {
         imap_host: endpoint.imap_host.clone(),
@@ -101,9 +117,13 @@ impl MailService {
 
     #[zbus(property)]
     async fn auth_method(&self) -> Result<String> {
-        Ok("oauth2".into())
+        Ok(if self.account.custom_mail.is_some() {
+            "password"
+        } else {
+            "oauth2"
+        }
+        .into())
     }
-
 }
 
 #[async_trait]
@@ -177,6 +197,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             last_used: None,
             services: [(Service::Email, true)].into(),
+            custom_mail: None,
         };
         let path = endpoint_object_path(&account);
         let server = zbus::connection::Builder::session()

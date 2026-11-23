@@ -18,6 +18,14 @@ pub trait Manager {
         params: HashMap<String, String>,
     ) -> Result<OwnedObjectPath>;
 
+    async fn create_mail_account(
+        &self,
+        email: &str,
+        username: &str,
+        settings: crate::models::CustomMailSettings,
+        password: &str,
+    ) -> Result<OwnedObjectPath>;
+
     #[zbus(property)]
     fn version(&self) -> Result<String>;
 
@@ -100,6 +108,10 @@ pub trait Account {
     async fn disable_service(&self, service: &str) -> Result<()>;
     async fn remove(&self) -> Result<()>;
     async fn ensure_credentials(&self) -> Result<()>;
+    async fn get_custom_mail_settings(&self) -> Result<crate::models::CustomMailSettings>;
+
+    async fn set_mail_password(&self, password: &str) -> Result<()>;
+
     async fn reauthenticate(&self) -> Result<OwnedObjectPath>;
 
     /// `a(sss)` of `(service, caller_identity, decision)`.
@@ -124,6 +136,9 @@ pub trait Credentials {
 
     /// Returns the validated settings, access token, and expiry for IMAP/SMTP.
     async fn get_mail_access(&self) -> Result<(MailConnectionSettings, String, i64)>;
+
+    /// Returns validated settings, login name, and the custom mail password.
+    async fn get_mail_password(&self) -> Result<(MailConnectionSettings, String, String)>;
 
     async fn invalidate_token(&self) -> Result<()>;
 }

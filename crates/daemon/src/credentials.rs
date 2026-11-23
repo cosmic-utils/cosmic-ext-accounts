@@ -71,7 +71,15 @@ impl CredentialsInterface {
 impl CredentialsInterface {
     #[zbus(property)]
     async fn auth_method(&self) -> Result<String> {
-        Ok("oauth2".into())
+        let account = self.config.lock().await.get_account(&self.id);
+        Ok(
+            if account.is_some_and(|account| account.custom_mail.is_some()) {
+                "password"
+            } else {
+                "oauth2"
+            }
+            .into(),
+        )
     }
 
     async fn get_access_token(
@@ -93,10 +101,38 @@ impl CredentialsInterface {
         let account = self.enabled_account(&Service::Email).await?;
         let settings = crate::services::mail_settings(&account)
             .map_err(|err| TokenError::Disabled(err.to_string()))?;
+        if account.custom_mail.is_some() {
+            return Err(TokenError::Disabled(
+                "This account uses a mail password".into(),
+            ));
+        }
         let (token, expiry) = self
             .issue_access_token(header, connection, "Email", true)
             .await?;
         Ok((settings, token, expiry))
+    }
+
+    async fn get_mail_password(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &zbus::Connection,
+    ) -> std::result::Result<
+        (accounts_core::proxy::MailConnectionSettings, String, String),
+        TokenError,
+    > {
+        let account = self.enabled_account(&Service::Email).await?;
+        if account.custom_mail.is_none() {
+            return Err(TokenError::Disabled("This account uses OAuth".into()));
+        }
+        self.authorize(header, connection, "Email").await?;
+        let auth = self.auth_manager.lock().await;
+        let account = self.enabled_account(&Service::Email).await?;
+        let settings = crate::services::mail_settings(&account)
+            .map_err(|err| TokenError::Disabled(err.to_string()))?;
+        let password = auth.mail_password(&self.id).await.map_err(|_| {
+            TokenError::NeedsReauth("Update the password in COSMIC Accounts".into())
+        })?;
+        Ok((settings, account.username, password))
     }
 
     /// Force a refresh on the next token request after a provider returns 401.
@@ -198,6 +234,11 @@ impl CredentialsInterface {
         oauth_only: bool,
     ) -> std::result::Result<(String, i64), TokenError> {
         let mut account = self.authorize(header, connection, service).await?;
+        if account.custom_mail.is_some() {
+            return Err(TokenError::Disabled(
+                "This account uses a mail password".into(),
+            ));
+        }
         let force_refresh = self.stale.lock().await.remove(&self.id);
         let mut auth_manager = self.auth_manager.lock().await;
 

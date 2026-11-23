@@ -154,10 +154,17 @@ impl cosmic::Application for Prompt {
 
         let p = &self.params;
 
-        let description = format!(
-            "{} wants to use {} with this {} account. The provider may grant the app access to other services on the same account.",
-            p.caller_name, p.service, p.provider_id,
-        );
+        let description = if p.provider_id == "custom-mail" {
+            format!(
+                "{} is asking for the saved mail password. Only allow apps you trust with this password.",
+                p.caller_name,
+            )
+        } else {
+            format!(
+                "{} wants to use {} with this {} account. The provider may grant the app access to other services on the same account.",
+                p.caller_name, p.service, p.provider_id,
+            )
+        };
 
         let content = widget::Column::new()
             .spacing(12)

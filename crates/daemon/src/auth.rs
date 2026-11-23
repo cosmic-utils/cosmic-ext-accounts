@@ -232,6 +232,7 @@ impl AuthManager {
                 created_at: Utc::now(),
                 last_used: Some(Utc::now()),
                 services: manifest.default_services(),
+                custom_mail: None,
             };
 
             self.storage
@@ -294,6 +295,7 @@ impl AuthManager {
                 created_at: Utc::now(),
                 last_used: Some(Utc::now()),
                 services: manifest.default_services(),
+                custom_mail: None,
             };
             self.storage
                 .set_account_credentials(&account.id, &credentials)
@@ -469,6 +471,33 @@ impl AuthManager {
             }
         }
         Ok(())
+    }
+
+    pub async fn set_mail_password(&self, id: &Uuid, password: &str) -> Result<()> {
+        self.storage
+            .set_account_credentials(
+                id,
+                &Credential {
+                    access_token: String::new(),
+                    refresh_token: None,
+                    expires_at: None,
+                    scope: Vec::new(),
+                    token_type: "mail-password".into(),
+                    credential_blob: Some(password.as_bytes().to_vec()),
+                },
+            )
+            .await
+    }
+
+    pub async fn mail_password(&self, id: &Uuid) -> Result<String> {
+        let credential = self.storage.get_account_credentials(id).await?;
+        if credential.token_type != "mail-password" {
+            return Err(Error::InvalidProviderConfig);
+        }
+        Ok(
+            std::str::from_utf8(credential.credential_blob.as_deref().unwrap_or_default())?
+                .to_owned(),
+        )
     }
 
     pub async fn delete_credentials(&self, id: &Uuid) -> Result<()> {

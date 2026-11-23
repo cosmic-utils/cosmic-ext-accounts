@@ -42,11 +42,25 @@ Run `just package-native` to build the package under `target/native/`. The provi
 must accept an ephemeral port on the configured `http://127.0.0.1` loopback redirect. The package
 includes the shared desktop client configuration.
 
+## Custom IMAP/SMTP accounts
+
+Open **Accounts for COSMIC → Add account → Custom IMAP/SMTP**. Enter the email address,
+server names and ports, and a password or app password. IMAP uses implicit TLS, typically
+on port 993. SMTP supports STARTTLS (typically port 587) and implicit TLS (typically port 465).
+The saved password goes into your desktop keyring. Select **Update mail password** on the
+account page to replace it.
+
+In Mail, open **Settings → Mail accounts** and select **Link** next to the account. The consent prompt
+asks whether Mail may retrieve the password. Revoking access blocks new password requests.
+If you need to invalidate a password an app has already obtained, rotate it on your mail server.
+
 ## Mail clients
 
 Mail clients can discover supported transports through `Endpoint.Mail.GetConnectionSettings`.
 `Credentials.GetMailAccess` applies the account's Email grant and returns the current, validated
-connection settings with an OAuth token for Gmail. The Google provider manifest declares the endpoints and TLS modes. The Microsoft provider's Graph credentials
+connection settings with an OAuth token for Gmail. Custom accounts use the separate
+`Credentials.GetMailPassword` method, which returns settings, username, and password after
+Email consent. The Google provider manifest declares the endpoints and TLS modes. The Microsoft provider's Graph credentials
 remain available through the generic credential API.
 
 ## Contributing

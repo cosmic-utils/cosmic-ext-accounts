@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
+mod custom_mail;
 mod dialog;
 mod view;
 
+use custom_mail::{MailField, MailForm, MailPassword};
 use view::caller_label;
 
 use crate::fl;
@@ -40,6 +42,9 @@ pub struct AppModel {
     /// Consent grants for `selected_account`: `(service, caller_identity, decision)`.
     grants: Vec<(String, String, String)>,
     pending_auth: Option<PendingAuth>,
+    mail_form: MailForm,
+    saving_mail: bool,
+    mail_error: Option<String>,
 }
 
 struct PendingAuth {
@@ -77,6 +82,12 @@ pub enum Message {
     GrantRevoked(String),
     RemoveAccount(Uuid),
     AccountRemoved(Uuid, String),
+
+    ChangeMailField(MailField, String),
+    ChangeMailPassword(MailPassword),
+    ChangeMailStarttls(bool),
+    SaveCustomMail(Option<Uuid>),
+    CustomMailSaved(Result<Option<Uuid>, String>),
 
     // Sign-in
     StartAuth(String, Option<Uuid>),
@@ -125,6 +136,9 @@ impl cosmic::Application for AppModel {
             selected_account: None,
             grants: Vec::new(),
             pending_auth: None,
+            mail_form: MailForm::default(),
+            saving_mail: false,
+            mail_error: None,
         };
 
         let tasks = vec![
@@ -301,11 +315,20 @@ impl cosmic::Application for AppModel {
                 }
             }
             Message::OpenDialog(page) => {
+                if self.saving_mail {
+                    return Task::none();
+                }
+                self.mail_form = MailForm::default();
+                self.mail_error = None;
                 self.dialog_pages.clear();
                 self.dialog_pages.push_back(page);
             }
             Message::CloseDialog => {
-                self.dialog_pages.pop_front();
+                if !self.saving_mail {
+                    self.mail_form = MailForm::default();
+                    self.mail_error = None;
+                    self.dialog_pages.pop_front();
+                }
             }
             Message::LaunchUrl(url) => {
                 if let Err(err) = open::that_detached(&url) {
@@ -559,6 +582,89 @@ impl cosmic::Application for AppModel {
                 tasks.push(self.update(Message::LoadAccounts));
             }
 
+            Message::ChangeMailField(field, value) => self.mail_form.change(field, value),
+            Message::ChangeMailPassword(password) => self.mail_form.password = password,
+            Message::ChangeMailStarttls(starttls) => {
+                if self.mail_form.smtp_port
+                    == if self.mail_form.smtp_starttls {
+                        "587"
+                    } else {
+                        "465"
+                    }
+                {
+                    self.mail_form.smtp_port = if starttls { "587" } else { "465" }.into();
+                }
+                self.mail_form.smtp_starttls = starttls;
+            }
+            Message::SaveCustomMail(existing) => {
+                if self.saving_mail {
+                    return Task::none();
+                }
+                let Some(client) = self.client.clone() else {
+                    self.mail_error = Some(fl!("service-unavailable"));
+                    return Task::none();
+                };
+                let settings = if existing.is_none() {
+                    match self.mail_form.settings() {
+                        Ok(settings) => Some(settings),
+                        Err(error) => {
+                            self.mail_error = Some(error);
+                            return Task::none();
+                        }
+                    }
+                } else {
+                    None
+                };
+                let email = self.mail_form.email.clone();
+                let username = self.mail_form.username.clone();
+                let password = self.mail_form.password.clone();
+                self.saving_mail = true;
+                self.mail_error = None;
+                tasks.push(Task::perform(
+                    async move {
+                        let result = match (existing, settings) {
+                            (Some(id), _) => client
+                                .set_mail_password(&id, &password.0)
+                                .await
+                                .map(|()| None),
+                            (None, Some(settings)) => client
+                                .create_mail_account(&email, &username, settings, &password.0)
+                                .await
+                                .map(Some),
+                            (None, None) => unreachable!("new account needs settings"),
+                        };
+                        result.map_err(|err| err.to_string())
+                    },
+                    |result| cosmic::action::app(Message::CustomMailSaved(result)),
+                ));
+            }
+            Message::CustomMailSaved(result) => {
+                self.saving_mail = false;
+                match result {
+                    Ok(Some(id)) => {
+                        tasks.push(self.update(Message::CloseDialog));
+                        tasks.push(self.update(Message::LoadAccounts));
+                        if let Some(client) = self.client.clone() {
+                            tasks.push(Task::perform(
+                                async move { client.get_account(&id).await },
+                                |result| match result {
+                                    Ok(account) => {
+                                        cosmic::action::app(Message::AccountReady(account, false))
+                                    }
+                                    Err(_) => cosmic::action::app(Message::LoadAccounts),
+                                },
+                            ));
+                        }
+                    }
+                    Ok(None) => {
+                        tasks.push(self.update(Message::CloseDialog));
+                        tasks.push(
+                            self.update(Message::ShowToast(fl!("custom-mail-password-saved"))),
+                        );
+                    }
+                    Err(error) => self.mail_error = Some(error),
+                }
+            }
             Message::StartAuth(provider, existing_account) => {
                 if self.pending_auth.is_some() {
                     return Task::none();

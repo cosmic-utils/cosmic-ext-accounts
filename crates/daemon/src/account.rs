@@ -262,6 +262,32 @@ impl AccountInterface {
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
 
+    async fn get_custom_mail_settings(&self) -> Result<accounts_core::models::CustomMailSettings> {
+        self.current().await?.custom_mail.ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("This account uses a provider manifest".into())
+        })
+    }
+
+    async fn set_mail_password(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        password: &str,
+    ) -> Result<()> {
+        self.authorize_manage(Some(&header)).await?;
+        crate::manager::validate_mail_password(password)?;
+        let auth = self.auth_manager.lock().await;
+        if self.current().await?.custom_mail.is_none() {
+            return Err(zbus::fdo::Error::NotSupported(
+                "This account uses OAuth".into(),
+            ));
+        }
+        auth.set_mail_password(&self.id, password)
+            .await
+            .map_err(|_| {
+                zbus::fdo::Error::Failed("Could not save the mail password to the keyring".into())
+            })
+    }
+
     async fn reauthenticate(&self) -> Result<OwnedObjectPath> {
         let account = self.current().await?;
         create_request(
@@ -326,6 +352,11 @@ impl AccountInterface {
         let Some(service) = Service::from_str(service.to_string()) else {
             return Err(Error::InvalidService(service.to_string()).into());
         };
+        if account.custom_mail.is_some() && service != Service::Email {
+            return Err(zbus::fdo::Error::NotSupported(
+                "Custom mail accounts only support Email".into(),
+            ));
+        }
         account.services.insert(service.clone(), enabled);
 
         {

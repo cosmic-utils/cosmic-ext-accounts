@@ -78,6 +78,12 @@ impl AccountsClient {
             })
             .collect();
 
+        let custom_mail = if provider == crate::models::CUSTOM_MAIL_PROVIDER {
+            Some(proxy.get_custom_mail_settings().await?)
+        } else {
+            None
+        };
+
         Ok(Account {
             id,
             provider,
@@ -89,6 +95,7 @@ impl AccountsClient {
                 .unwrap_or_else(|_| chrono::Utc::now()),
             last_used: chrono::DateTime::from_str(&last_used).ok(),
             services,
+            custom_mail,
         })
     }
 }
@@ -110,6 +117,28 @@ impl AccountsClient {
             .into_iter()
             .filter(|a| a.enabled && matches!(a.services.get(&service), Some(true)))
             .collect())
+    }
+
+    pub async fn create_mail_account(
+        &self,
+        email: &str,
+        username: &str,
+        settings: crate::models::CustomMailSettings,
+        password: &str,
+    ) -> Result<Uuid> {
+        let path = self
+            .manager
+            .create_mail_account(email, username, settings, password)
+            .await?;
+        let proxy = self.account_proxy(path).await?;
+        Uuid::parse_str(&proxy.id().await?).map_err(|err| zbus::fdo::Error::Failed(err.to_string()))
+    }
+
+    pub async fn set_mail_password(&self, id: &Uuid, password: &str) -> Result<()> {
+        self.account_proxy(Self::account_path(id))
+            .await?
+            .set_mail_password(password)
+            .await
     }
 
     /// Starts sign-in. Watch the request status and open `InteractionUri` when prompted.
