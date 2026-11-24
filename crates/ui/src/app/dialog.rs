@@ -84,40 +84,61 @@ impl AppModel {
     fn custom_mail_dialog<'a>(&'a self, existing: Option<Uuid>) -> Element<'a, Message> {
         let form = &self.mail_form;
         let editable = !self.saving_mail;
-        let field = |label, value: &'a str, field| {
-            widget::text_input(label, value)
+        let label = |text| widget::text::body(text).width(Length::FillPortion(2));
+        let field = |placeholder: String, value: &'a str, field| {
+            widget::text_input(placeholder, value)
                 .editing(editable)
                 .on_input(move |value| Message::ChangeMailField(field, value))
         };
+        let field_row = |title, input: Element<'a, Message>| {
+            widget::settings::item_row(vec![label(title).into(), input])
+        };
         let server_fields = |host: &'a str, host_field, port: &'a str, port_field| {
             widget::settings::item_row(vec![
-                field(fl!("custom-mail-host"), host, host_field)
-                    .width(Length::Fill)
+                label(fl!("custom-mail-host")).into(),
+                field(String::new(), host, host_field)
+                    .width(Length::FillPortion(3))
                     .into(),
-                field(fl!("custom-mail-port"), port, port_field)
+                widget::text::body(fl!("custom-mail-port")).into(),
+                field(String::new(), port, port_field)
                     .width(Length::Fixed(88.0))
                     .into(),
             ])
         };
-        let password =
-            widget::secure_input(fl!("custom-mail-password"), &form.password.0, None, true)
-                .editing(editable)
-                .on_input(|value| Message::ChangeMailPassword(MailPassword(value)));
+        let password = field_row(
+            fl!("custom-mail-password"),
+            widget::secure_input(
+                fl!("custom-mail-password-hint"),
+                &form.password.0,
+                None,
+                true,
+            )
+            .width(Length::FillPortion(3))
+            .editing(editable)
+            .on_input(|value| Message::ChangeMailPassword(MailPassword(value)))
+            .into(),
+        );
         let mut fields = widget::column::with_capacity(4).spacing(spacing().space_s);
         if existing.is_none() {
             fields = fields
                 .push(
                     widget::settings::section()
                         .title(fl!("account"))
-                        .add(field(
+                        .add(field_row(
                             fl!("custom-mail-email"),
-                            &form.email,
-                            MailField::Email,
+                            field(String::new(), &form.email, MailField::Email)
+                                .width(Length::FillPortion(3))
+                                .into(),
                         ))
-                        .add(field(
+                        .add(field_row(
                             fl!("custom-mail-username"),
-                            &form.username,
-                            MailField::Username,
+                            field(
+                                fl!("custom-mail-username-hint"),
+                                &form.username,
+                                MailField::Username,
+                            )
+                            .width(Length::FillPortion(3))
+                            .into(),
                         ))
                         .add(password),
                 )
