@@ -6,7 +6,8 @@ mod service;
 
 pub use account::{
     Account, CUSTOM_CALDAV_PROVIDER, CUSTOM_CARDDAV_PROVIDER, CUSTOM_LDAP_PROVIDER,
-    CUSTOM_MAIL_PROVIDER, ContactsConnectionSettings, CustomMailSettings, DbusAccount,
+    CUSTOM_MAIL_PROVIDER, ContactsConnectionSettings, CustomMailSettings,
+    CustomMailSettingsError, DbusAccount,
 };
 pub use credentials::Credential;
 pub use provider::Provider;

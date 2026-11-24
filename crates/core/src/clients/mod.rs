@@ -9,5 +9,5 @@ mod tasks;
 pub use account::AccountsClient;
 pub use calendar::CalendarClient;
 pub use contacts::ContactsClient;
-pub use mail::MailClient;
+pub use mail::{MailClient, MailCredentials};
 pub use tasks::TasksClient;

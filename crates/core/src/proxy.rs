@@ -43,6 +43,11 @@ pub trait Manager {
     #[zbus(property)]
     fn version(&self) -> Result<String>;
 
+    /// Version of the mail endpoint published by this daemon. `0` means the
+    /// daemon predates the mail endpoint and cannot serve mail consumers.
+    #[zbus(property)]
+    fn mail_endpoint_version(&self) -> Result<u32>;
+
     #[zbus(signal)]
     fn account_added(account: OwnedObjectPath) -> Result<()>;
 
@@ -232,8 +237,32 @@ pub trait Contacts {
     fn auth_method(&self) -> Result<String>;
 }
 
+/// Authentication schemes advertised by a mail endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MailAuthMethod {
+    Password,
+    OAuth2,
+}
+
+impl MailAuthMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Password => "password",
+            Self::OAuth2 => "xoauth2",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "password" => Some(Self::Password),
+            "xoauth2" => Some(Self::OAuth2),
+            _ => None,
+        }
+    }
+}
+
 /// Mail transport settings in the order used by the D-Bus wire format.
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, zbus::zvariant::Type)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, zbus::zvariant::Type)]
 pub struct MailConnectionSettings {
     pub imap_host: String,
     pub imap_port: u16,
@@ -242,6 +271,27 @@ pub struct MailConnectionSettings {
     pub smtp_port: u16,
     pub smtp_tls: String,
     pub authentication: String,
+}
+
+impl MailConnectionSettings {
+    pub fn auth_method(&self) -> Option<MailAuthMethod> {
+        MailAuthMethod::parse(&self.authentication)
+    }
+
+    /// Whether these settings can be used to open an IMAP/SMTP session.
+    pub fn is_supported(&self) -> bool {
+        self.imap_tls == "tls"
+            && matches!(self.smtp_tls.as_str(), "tls" | "starttls")
+            && self.auth_method().is_some()
+            && !self.imap_host.is_empty()
+            && !self.smtp_host.is_empty()
+            && self.imap_port != 0
+            && self.smtp_port != 0
+    }
+
+    pub fn smtp_starttls(&self) -> bool {
+        self.smtp_tls == "starttls"
+    }
 }
 
 #[proxy(
@@ -269,4 +319,35 @@ pub const HANDLER_BLOB_PARAM: &str = "dev.edfloreshz.Accounts.credential_blob";
 pub trait ProviderHandler {
     /// Returns the account identity and an opaque credential blob.
     async fn authenticate(&self, params: HashMap<String, String>) -> Result<(String, Vec<u8>)>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings() -> MailConnectionSettings {
+        MailConnectionSettings {
+            imap_host: "imap.example.com".into(),
+            imap_port: 993,
+            imap_tls: "tls".into(),
+            smtp_host: "smtp.example.com".into(),
+            smtp_port: 587,
+            smtp_tls: "starttls".into(),
+            authentication: "xoauth2".into(),
+        }
+    }
+
+    #[test]
+    fn mail_settings_are_validated_once_for_all_consumers() {
+        let settings = settings();
+        assert!(settings.is_supported());
+        assert!(settings.smtp_starttls());
+        assert_eq!(settings.auth_method(), Some(MailAuthMethod::OAuth2));
+
+        let unsupported = MailConnectionSettings {
+            imap_tls: "none".into(),
+            ..settings
+        };
+        assert!(!unsupported.is_supported());
+    }
 }

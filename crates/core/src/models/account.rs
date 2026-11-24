@@ -12,6 +12,15 @@ pub const CUSTOM_LDAP_PROVIDER: &str = "custom-ldap";
 pub const CUSTOM_CALDAV_PROVIDER: &str = "custom-caldav";
 pub const CUSTOM_MAIL_PROVIDER: &str = "custom-mail";
 
+/// Field-level validation failure for a custom mail account form.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CustomMailSettingsError {
+    ImapHost,
+    ImapPort,
+    SmtpHost,
+    SmtpPort,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Type)]
 pub struct CustomMailSettings {
     pub imap_host: String,
@@ -19,6 +28,25 @@ pub struct CustomMailSettings {
     pub smtp_host: String,
     pub smtp_port: u16,
     pub smtp_starttls: bool,
+}
+
+impl CustomMailSettings {
+    /// Validates host names and ports shared by every custom-mail form.
+    pub fn validate(&self) -> Result<(), CustomMailSettingsError> {
+        if self.imap_host.trim().is_empty() {
+            return Err(CustomMailSettingsError::ImapHost);
+        }
+        if self.imap_port == 0 {
+            return Err(CustomMailSettingsError::ImapPort);
+        }
+        if self.smtp_host.trim().is_empty() {
+            return Err(CustomMailSettingsError::SmtpHost);
+        }
+        if self.smtp_port == 0 {
+            return Err(CustomMailSettingsError::SmtpPort);
+        }
+        Ok(())
+    }
 }
 
 /// Directory settings. The base DN is empty for CardDAV.
@@ -51,6 +79,19 @@ pub struct Account {
 impl Account {
     pub fn dbus_id(&self) -> String {
         self.id.to_string().replace("-", "_")
+    }
+
+    /// Whether this account is enabled and offers the given service.
+    pub fn is_enabled_for(&self, service: &Service) -> bool {
+        self.enabled && self.services.get(service).copied().unwrap_or(false)
+    }
+
+    /// Best label for the account when it has no email address.
+    pub fn email_or_identity(&self) -> &str {
+        self.email
+            .as_deref()
+            .filter(|email| !email.is_empty())
+            .unwrap_or(&self.username)
     }
 }
 
@@ -137,5 +178,28 @@ impl From<DbusAccount> for Account {
                 .map(|(service, enabled)| (Service::from_str(service).unwrap(), enabled))
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_mail_settings_validate_hosts_and_ports() {
+        let valid = CustomMailSettings {
+            imap_host: "imap.example.com".into(),
+            imap_port: 993,
+            smtp_host: "smtp.example.com".into(),
+            smtp_port: 587,
+            smtp_starttls: true,
+        };
+        assert_eq!(valid.validate(), Ok(()));
+
+        let invalid = CustomMailSettings {
+            imap_port: 0,
+            ..valid
+        };
+        assert_eq!(invalid.validate(), Err(CustomMailSettingsError::ImapPort));
     }
 }

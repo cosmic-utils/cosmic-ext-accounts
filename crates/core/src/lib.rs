@@ -1,11 +1,15 @@
 pub mod clients;
 pub mod config;
+pub mod error;
 pub mod models;
 pub mod proxy;
 pub mod registry;
+pub mod ui;
 mod service;
 
-pub use clients::AccountsClient;
+pub use clients::{AccountsClient, MailClient, MailCredentials};
+pub use error::AccountsError;
+pub use proxy::{MailAuthMethod, MailConnectionSettings};
 pub use registry::{OAuthManifest, ProviderManifest, ProviderManifestInfo, ProviderRegistry};
 pub use service::*;
 

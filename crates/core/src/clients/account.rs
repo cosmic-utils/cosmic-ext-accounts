@@ -2,14 +2,26 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use crate::{
+    error::{AccountsError, Result as AccountsResult},
     models::{Account, DbusProviderInfo, Provider, Service},
     proxy::{
         AccountAddedStream, AccountProxy, AccountRemovedStream, AccountToggledStream,
-        CredentialsProxy, ManagerProxy, ProviderProxy, RequestProxy,
+        CredentialsProxy, MailConnectionSettings, MailProxy, ManagerProxy, ProviderProxy,
+        RequestProxy,
     },
 };
 use uuid::Uuid;
 use zbus::{Connection, fdo::Result, zvariant::OwnedObjectPath};
+
+use super::mail::{self, MailCredentials};
+
+pub(super) fn account_path(id: &Uuid) -> OwnedObjectPath {
+    OwnedObjectPath::try_from(format!(
+        "/dev/edfloreshz/Accounts/Accounts/{}",
+        id.to_string().replace('-', "_")
+    ))
+    .expect("account object path is always a valid path")
+}
 
 #[derive(Debug, Clone)]
 pub struct AccountsClient {
@@ -27,12 +39,12 @@ impl AccountsClient {
         })
     }
 
-    fn account_path(id: &Uuid) -> OwnedObjectPath {
-        OwnedObjectPath::try_from(format!(
-            "/dev/edfloreshz/Accounts/Accounts/{}",
-            id.to_string().replace('-', "_")
-        ))
-        .expect("account object path is always a valid path")
+    /// Connects to the broker using the shared error type.
+    ///
+    /// This is the constructor consumers should use when they want
+    /// `AccountsError` rather than the raw `zbus` error from `new()`.
+    pub async fn connect() -> AccountsResult<Self> {
+        Self::new().await.map_err(AccountsError::from)
     }
 
     async fn account_proxy(&self, path: OwnedObjectPath) -> Result<AccountProxy<'static>> {
@@ -132,8 +144,98 @@ impl AccountsClient {
         let accounts = self.list_accounts().await?;
         Ok(accounts
             .into_iter()
-            .filter(|a| a.enabled && matches!(a.services.get(&service), Some(true)))
+            .filter(|account| account.is_enabled_for(&service))
             .collect())
+    }
+
+    /// Version of the mail endpoint advertised by the daemon.
+    pub async fn mail_endpoint_version(&self) -> AccountsResult<u32> {
+        self.manager
+            .mail_endpoint_version()
+            .await
+            .map_err(AccountsError::from)
+    }
+
+    /// Lists accounts usable for mail, with their validated endpoints.
+    ///
+    /// This performs the discovery/filtering every mail consumer would
+    /// otherwise reimplement: enabled accounts with the Email service, a
+    /// usable email identity and supported IMAP/SMTP settings.
+    pub async fn list_mail_accounts(&self) -> AccountsResult<Vec<(Account, MailConnectionSettings)>> {
+        if self.mail_endpoint_version().await? == 0 {
+            return Err(AccountsError::UpgradeRequired);
+        }
+
+        let mut result = Vec::new();
+        for account in self.list_enabled_accounts(Service::Email).await? {
+            let email = account.email_or_identity();
+            if email.is_empty() || email.chars().any(char::is_control) {
+                continue;
+            }
+            let endpoint = MailProxy::builder(&self.connection)
+                .path(account_path(&account.id))
+                .map_err(AccountsError::from)?
+                .build()
+                .await
+                .map_err(AccountsError::from)?;
+            let settings = endpoint
+                .get_connection_settings()
+                .await
+                .map_err(AccountsError::from)?;
+            if settings.is_supported() {
+                result.push((account, settings));
+            }
+        }
+        Ok(result)
+    }
+
+    /// Returns validated mail settings and an OAuth access token.
+    pub async fn get_mail_access(
+        &self,
+        id: &Uuid,
+        refresh: bool,
+    ) -> AccountsResult<(MailConnectionSettings, String, i64)> {
+        let credentials = mail::credentials_proxy(&self.connection, id).await?;
+        if refresh {
+            credentials
+                .invalidate_token()
+                .await
+                .map_err(AccountsError::from)?;
+        }
+        credentials
+            .get_mail_access()
+            .await
+            .map_err(AccountsError::from)
+    }
+
+    /// Returns validated mail settings, login name and custom-mail password.
+    pub async fn get_mail_password(
+        &self,
+        id: &Uuid,
+    ) -> AccountsResult<(MailConnectionSettings, String, String)> {
+        mail::credentials_proxy(&self.connection, id)
+            .await?
+            .get_mail_password()
+            .await
+            .map_err(AccountsError::from)
+    }
+
+    /// Marks an OAuth token stale so the next request refreshes it.
+    pub async fn invalidate_mail_token(&self, id: &Uuid) -> AccountsResult<()> {
+        mail::credentials_proxy(&self.connection, id)
+            .await?
+            .invalidate_token()
+            .await
+            .map_err(AccountsError::from)
+    }
+
+    /// Resolves settings and credentials in one call, including consent.
+    pub async fn mail_credentials(
+        &self,
+        id: &Uuid,
+        refresh: bool,
+    ) -> AccountsResult<MailCredentials> {
+        mail::mail_credentials(&self.connection, id, refresh).await
     }
 
     pub async fn create_mail_account(
@@ -152,7 +254,7 @@ impl AccountsClient {
     }
 
     pub async fn set_mail_password(&self, id: &Uuid, password: &str) -> Result<()> {
-        self.account_proxy(Self::account_path(id))
+        self.account_proxy(account_path(id))
             .await?
             .set_mail_password(password)
             .await
@@ -173,7 +275,7 @@ impl AccountsClient {
     }
 
     pub async fn set_caldav_password(&self, id: &Uuid, password: &str) -> Result<()> {
-        self.account_proxy(Self::account_path(id))
+        self.account_proxy(account_path(id))
             .await?
             .set_caldav_password(password)
             .await
@@ -194,7 +296,7 @@ impl AccountsClient {
     }
 
     pub async fn set_contacts_password(&self, id: &Uuid, password: &str) -> Result<()> {
-        self.account_proxy(Self::account_path(id))
+        self.account_proxy(account_path(id))
             .await?
             .set_contacts_password(password)
             .await
@@ -233,17 +335,17 @@ impl AccountsClient {
     }
 
     pub async fn get_account(&self, id: &Uuid) -> Result<Account> {
-        let proxy = self.account_proxy(Self::account_path(id)).await?;
+        let proxy = self.account_proxy(account_path(id)).await?;
         Self::account_from_proxy(&proxy).await
     }
 
     pub async fn remove_account(&mut self, id: &Uuid) -> Result<()> {
-        let proxy = self.account_proxy(Self::account_path(id)).await?;
+        let proxy = self.account_proxy(account_path(id)).await?;
         proxy.remove().await
     }
 
     pub async fn set_account_enabled(&mut self, id: &Uuid, enabled: bool) -> Result<()> {
-        let proxy = self.account_proxy(Self::account_path(id)).await?;
+        let proxy = self.account_proxy(account_path(id)).await?;
         proxy.set_enabled(enabled).await
     }
 
@@ -253,7 +355,7 @@ impl AccountsClient {
         service: &Service,
         enabled: bool,
     ) -> Result<()> {
-        let proxy = self.account_proxy(Self::account_path(id)).await?;
+        let proxy = self.account_proxy(account_path(id)).await?;
         if enabled {
             proxy.enable_service(&service.to_string()).await
         } else {
@@ -262,13 +364,13 @@ impl AccountsClient {
     }
 
     pub async fn ensure_credentials(&mut self, id: &Uuid) -> Result<()> {
-        let proxy = self.account_proxy(Self::account_path(id)).await?;
+        let proxy = self.account_proxy(account_path(id)).await?;
         proxy.ensure_credentials().await.map(|_| ())
     }
 
     /// Standing consent grants for this account: `(service, caller_identity, decision)`.
     pub async fn list_grants(&self, id: &Uuid) -> Result<Vec<(String, String, String)>> {
-        let proxy = self.account_proxy(Self::account_path(id)).await?;
+        let proxy = self.account_proxy(account_path(id)).await?;
         proxy.list_grants().await
     }
 
@@ -278,7 +380,7 @@ impl AccountsClient {
         service: &str,
         caller_identity: &str,
     ) -> Result<()> {
-        let proxy = self.account_proxy(Self::account_path(id)).await?;
+        let proxy = self.account_proxy(account_path(id)).await?;
         proxy.revoke_grant(service, caller_identity).await
     }
 
@@ -290,7 +392,7 @@ impl AccountsClient {
         service: &Service,
     ) -> Result<(String, i64)> {
         let proxy = CredentialsProxy::builder(&self.connection)
-            .path(Self::account_path(id))
+            .path(account_path(id))
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?
             .build()
             .await?;
@@ -299,7 +401,7 @@ impl AccountsClient {
 
     /// Starts reauthentication with the same request lifecycle as `create_account`.
     pub async fn reauthenticate(&mut self, id: &Uuid) -> Result<RequestProxy<'static>> {
-        let proxy = self.account_proxy(Self::account_path(id)).await?;
+        let proxy = self.account_proxy(account_path(id)).await?;
         let path = proxy.reauthenticate().await?;
         self.request_proxy(path).await
     }
