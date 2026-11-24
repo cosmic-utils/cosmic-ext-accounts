@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <path id="envelope" d="M12 62a12 12 0 0 1 4-9l40-35a12 12 0 0 1 16 0l40 35a12 12 0 0 1 4 9v40a12 12 0 0 1-12 12H24a12 12 0 0 1-12-12Z"/>
+    <clipPath id="envelope-edge">
+      <use xlink:href="#envelope"/>
+    </clipPath>
+  </defs>
+  <use xlink:href="#envelope" fill="#126875"/>
+  <rect x="29" y="23" width="70" height="66" rx="9" fill="#edf5f5"/>
+  <path fill="#83aeb7" d="M43 39h42a3 3 0 0 1 0 6H43a3 3 0 0 1 0-6Zm0 13h29a3 3 0 0 1 0 6H43a3 3 0 0 1 0-6Z"/>
+  <g clip-path="url(#envelope-edge)">
+    <path fill="#239ba6" d="m8 53 49 32a13 13 0 0 0 14 0l49-32v65H8Z"/>
+    <path fill="#42b9c0" d="m8 118 49-38a11 11 0 0 1 14 0l49 38Z"/>
+  </g>
+</svg>

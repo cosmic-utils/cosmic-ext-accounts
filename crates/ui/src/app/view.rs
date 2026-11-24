@@ -14,6 +14,7 @@ use cosmic::widget;
 const APP_ICON: &[u8] = include_bytes!("../../resources/icons/hicolor/scalable/apps/icon.svg");
 const GOOGLE_ICON: &[u8] = include_bytes!("../../resources/img/google.png");
 const MICROSOFT_ICON: &[u8] = include_bytes!("../../resources/img/microsoft.png");
+const MAIL_ICON: &[u8] = include_bytes!("../../resources/img/mail.svg");
 
 const CONTENT_WIDTH: f32 = 720.0;
 const PROSE_WIDTH: f32 = 520.0;
@@ -259,25 +260,33 @@ impl AppModel {
             .providers
             .iter()
             .map(|provider| {
-                widget::Row::new()
-                    .push(self.provider_icon(&provider.id, 32))
-                    .push(widget::text::body(provider.name.clone()).width(Length::Fill))
-                    .push(widget::icon::from_name("go-next-symbolic").size(16))
-                    .spacing(spacing().space_s)
-                    .align_y(Alignment::Center)
-                    .apply(widget::button::custom)
-                    .padding([spacing().space_s, spacing().space_m])
-                    .width(Length::Fill)
-                    .name(provider.name.clone())
-                    .on_press(Message::StartAuth(provider.id.clone(), None))
-                    .into()
+                provider_row(
+                    self.provider_icon(&provider.id, 32),
+                    provider.name.clone(),
+                    "go-next-symbolic",
+                    Message::StartAuth(provider.id.clone(), None),
+                )
             })
             .collect();
 
-        rows.push(widget::button::standard(fl!("custom-mail-title"))
-            .width(Length::Fill)
-            .on_press(Message::OpenDialog(super::DialogPage::CustomMail(None)))
-            .into());
+        rows.push(provider_row(
+            widget::icon::from_name("list-add-symbolic").size(32).into(),
+            fl!("add-other-account"),
+            if self.other_accounts_expanded {
+                "go-down-symbolic"
+            } else {
+                "go-next-symbolic"
+            },
+            Message::ToggleOtherAccounts,
+        ));
+        if self.other_accounts_expanded {
+            rows.push(provider_row(
+                self.provider_icon(CUSTOM_MAIL_PROVIDER, 32),
+                fl!("custom-mail-title"),
+                "go-next-symbolic",
+                Message::OpenDialog(super::DialogPage::CustomMail(None)),
+            ));
+        }
         widget::Column::with_children(rows)
             .spacing(spacing().space_xs)
             .width(Length::Fill)
@@ -286,7 +295,7 @@ impl AppModel {
 
     pub(super) fn provider_name(&self, provider_id: &str) -> String {
         if provider_id == CUSTOM_MAIL_PROVIDER {
-            return fl!("custom-mail-title");
+            return fl!("custom-mail-provider-name");
         }
         self.providers
             .iter()
@@ -359,10 +368,31 @@ fn warning_banner(message: String) -> Element<'static, Message> {
         .into()
 }
 
+fn provider_row(
+    icon: Element<'static, Message>,
+    label: String,
+    chevron: &'static str,
+    message: Message,
+) -> Element<'static, Message> {
+    widget::Row::new()
+        .push(icon)
+        .push(widget::text::body(label.clone()).width(Length::Fill))
+        .push(widget::icon::from_name(chevron).size(16))
+        .spacing(spacing().space_s)
+        .align_y(Alignment::Center)
+        .apply(widget::button::custom)
+        .padding([spacing().space_s, spacing().space_m])
+        .width(Length::Fill)
+        .name(label)
+        .on_press(message)
+        .into()
+}
+
 fn bundled_provider_icon(provider_id: &str) -> widget::icon::Handle {
     match provider_id {
         "google" => widget::icon::from_raster_bytes(GOOGLE_ICON),
         "microsoft" => widget::icon::from_raster_bytes(MICROSOFT_ICON),
+        CUSTOM_MAIL_PROVIDER => widget::icon::from_svg_bytes(MAIL_ICON),
         _ => widget::icon::from_name("network-server-symbolic").into(),
     }
 }

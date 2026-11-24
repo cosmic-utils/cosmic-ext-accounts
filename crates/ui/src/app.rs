@@ -45,6 +45,7 @@ pub struct AppModel {
     mail_form: MailForm,
     saving_mail: bool,
     mail_error: Option<String>,
+    other_accounts_expanded: bool,
 }
 
 struct PendingAuth {
@@ -83,6 +84,7 @@ pub enum Message {
     RemoveAccount(Uuid),
     AccountRemoved(Uuid, String),
 
+    ToggleOtherAccounts,
     ChangeMailField(MailField, String),
     ChangeMailPassword(MailPassword),
     ChangeMailStarttls(bool),
@@ -139,6 +141,7 @@ impl cosmic::Application for AppModel {
             mail_form: MailForm::default(),
             saving_mail: false,
             mail_error: None,
+            other_accounts_expanded: false,
         };
 
         let mut tasks = vec![
@@ -324,6 +327,9 @@ impl cosmic::Application for AppModel {
                 }
                 self.mail_form = MailForm::default();
                 self.mail_error = None;
+                if matches!(page, DialogPage::AddAccount) {
+                    self.other_accounts_expanded = false;
+                }
                 self.dialog_pages.clear();
                 self.dialog_pages.push_back(page);
             }
@@ -586,6 +592,9 @@ impl cosmic::Application for AppModel {
                 tasks.push(self.update(Message::LoadAccounts));
             }
 
+            Message::ToggleOtherAccounts => {
+                self.other_accounts_expanded = !self.other_accounts_expanded;
+            }
             Message::ChangeMailField(field, value) => self.mail_form.change(field, value),
             Message::ChangeMailPassword(password) => self.mail_form.password = password,
             Message::ChangeMailStarttls(starttls) => {

@@ -44,7 +44,7 @@ includes the shared desktop client configuration.
 
 ## Custom IMAP/SMTP accounts
 
-Open **Accounts for COSMIC → Add account → Custom IMAP/SMTP**. Enter the email address,
+Open **Accounts for COSMIC → Add account → Add Other Account... → Add email account**. Enter the email address,
 server names and ports, and a password or app password. IMAP uses implicit TLS, typically
 on port 993. SMTP supports STARTTLS (typically port 587) and implicit TLS (typically port 465).
 The saved password goes into your desktop keyring. Select **Update mail password** on the

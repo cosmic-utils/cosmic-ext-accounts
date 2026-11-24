@@ -75,7 +75,9 @@ sign-in-again = Sign in again
 account-reconnected = { $account } was reconnected
 accounts-load-failed = Could not load accounts. Open Accounts again to retry.
 
-custom-mail-title = Custom IMAP/SMTP
+add-other-account = Add Other Account...
+custom-mail-title = Add email account
+custom-mail-provider-name = Email account
 custom-mail-email = Email address
 custom-mail-username = Username (optional, defaults to email)
 custom-mail-host = Hostname
