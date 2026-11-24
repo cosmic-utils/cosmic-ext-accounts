@@ -5,7 +5,10 @@ use crate::{
 };
 use accounts_core::{
     config::AccountsConfig,
-    models::{Account, CUSTOM_CALDAV_PROVIDER, CUSTOM_MAIL_PROVIDER, CustomMailSettings, Service},
+    models::{
+        Account, CUSTOM_CALDAV_PROVIDER, CUSTOM_CARDDAV_PROVIDER, CUSTOM_LDAP_PROVIDER,
+        CUSTOM_MAIL_PROVIDER, ContactsConnectionSettings, CustomMailSettings, Service,
+    },
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
@@ -72,27 +75,18 @@ fn custom_mail_account(
         services: [(Service::Email, true)].into(),
         custom_mail: Some(settings),
         caldav_url: None,
+        custom_contacts: None,
     })
 }
 
 fn custom_caldav_account(url: &str, username: &str) -> Result<Account> {
     use zbus::fdo::Error;
 
-    let url = url::Url::parse(url.trim())
-        .ok()
-        .filter(|url| {
-            url.scheme() == "https"
-                && url.host().is_some()
-                && url.username().is_empty()
-                && url.password().is_none()
-                && url.query().is_none()
-                && url.fragment().is_none()
-        })
-        .ok_or_else(|| {
-            Error::InvalidArgs(
-                "Enter an HTTPS CalDAV URL without credentials, a query, or a fragment".into(),
-            )
-        })?;
+    let url = password_server_url(url, "https").ok_or_else(|| {
+        Error::InvalidArgs(
+            "Enter an HTTPS CalDAV URL without credentials, a query, or a fragment".into(),
+        )
+    })?;
 
     let username = username.trim();
     if username.is_empty() || username.contains(':') || username.chars().any(char::is_control) {
@@ -111,6 +105,77 @@ fn custom_caldav_account(url: &str, username: &str) -> Result<Account> {
         services: [(Service::Calendar, true)].into(),
         custom_mail: None,
         caldav_url: Some(url.into()),
+        custom_contacts: None,
+    })
+}
+
+fn password_server_url(value: &str, scheme: &str) -> Option<url::Url> {
+    url::Url::parse(value.trim()).ok().filter(|url| {
+        url.scheme() == scheme
+            && url.host().is_some()
+            && url.port() != Some(0)
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none()
+    })
+}
+
+fn custom_contacts_account(
+    mut settings: ContactsConnectionSettings,
+    username: &str,
+) -> Result<Account> {
+    use zbus::fdo::Error;
+
+    let (provider, scheme) = match settings.protocol.as_str() {
+        "carddav" => (CUSTOM_CARDDAV_PROVIDER, "https"),
+        "ldap" => (CUSTOM_LDAP_PROVIDER, "ldaps"),
+        _ => return Err(Error::InvalidArgs("Unsupported contacts protocol".into())),
+    };
+    let mut uri = password_server_url(&settings.uri, scheme).ok_or_else(|| {
+        Error::InvalidArgs(format!(
+            "Enter a {scheme}:// URL without credentials, a query, or a fragment"
+        ))
+    })?;
+    let username = username.trim();
+    if username.is_empty()
+        || username.chars().any(char::is_control)
+        || (provider == CUSTOM_CARDDAV_PROVIDER && username.contains(':'))
+    {
+        return Err(Error::InvalidArgs(
+            "Enter a valid username or LDAP bind DN".into(),
+        ));
+    }
+
+    settings.base_dn = settings.base_dn.trim().to_owned();
+    if provider == CUSTOM_LDAP_PROVIDER {
+        if !matches!(uri.path(), "" | "/") {
+            return Err(Error::InvalidArgs(
+                "Enter the LDAP base DN separately from the server URL".into(),
+            ));
+        }
+        if settings.base_dn.is_empty() || settings.base_dn.chars().any(char::is_control) {
+            return Err(Error::InvalidArgs("Enter an LDAP base DN".into()));
+        }
+        uri.set_path("");
+    } else if !settings.base_dn.is_empty() {
+        return Err(Error::InvalidArgs("A base DN is only used for LDAP".into()));
+    }
+    settings.uri = uri.into();
+
+    Ok(Account {
+        id: Uuid::new_v4(),
+        provider: provider.into(),
+        display_name: username.into(),
+        username: username.into(),
+        email: None,
+        enabled: true,
+        created_at: chrono::Utc::now(),
+        last_used: None,
+        services: [(Service::Contacts, true)].into(),
+        custom_mail: None,
+        caldav_url: None,
+        custom_contacts: Some(settings),
     })
 }
 
@@ -183,6 +248,7 @@ impl ManagerInterface {
                     && saved.email == account.email
                     && saved.custom_mail == account.custom_mail
                     && saved.caldav_url == account.caldav_url
+                    && saved.custom_contacts == account.custom_contacts
             }) {
                 return Err(Error::InvalidArgs("That account already exists".into()));
             }
@@ -278,12 +344,37 @@ impl ManagerInterface {
             .await
     }
 
+    async fn create_contacts_account(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &Connection,
+        settings: ContactsConnectionSettings,
+        username: &str,
+        password: &str,
+    ) -> Result<OwnedObjectPath> {
+        let account = custom_contacts_account(settings, username)?;
+        self.create_password_account(
+            header,
+            connection,
+            account,
+            PasswordKind::Contacts,
+            password,
+        )
+        .await
+    }
+
     async fn create_account(
         &self,
         provider_id: &str,
         params: HashMap<String, String>,
     ) -> Result<OwnedObjectPath> {
-        if matches!(provider_id, CUSTOM_MAIL_PROVIDER | CUSTOM_CALDAV_PROVIDER) {
+        if matches!(
+            provider_id,
+            CUSTOM_MAIL_PROVIDER
+                | CUSTOM_CALDAV_PROVIDER
+                | CUSTOM_CARDDAV_PROVIDER
+                | CUSTOM_LDAP_PROVIDER
+        ) {
             return Err(zbus::fdo::Error::NotSupported(
                 "Use the dedicated custom account method".into(),
             ));
@@ -644,6 +735,88 @@ mod mail_tests {
         }
         assert!(custom_caldav_account("https://dav.example.org/", "").is_err());
         assert!(custom_caldav_account("https://dav.example.org/", "me:other").is_err());
+    }
+
+    fn contacts_settings(protocol: &str, uri: &str, base_dn: &str) -> ContactsConnectionSettings {
+        ContactsConnectionSettings {
+            protocol: protocol.into(),
+            uri: uri.into(),
+            base_dn: base_dn.into(),
+        }
+    }
+
+    #[test]
+    fn custom_contacts_require_their_protocols_secure_url() {
+        for settings in [
+            contacts_settings("carddav", "http://dav.example.org", ""),
+            contacts_settings("carddav", "https://user:password@dav.example.org", ""),
+            contacts_settings("carddav", "https://dav.example.org", "dc=example,dc=org"),
+            contacts_settings("ldap", "ldap://directory.example.org", "dc=example,dc=org"),
+            contacts_settings("ldap", "ldaps://directory.example.org", ""),
+            contacts_settings(
+                "ldap",
+                "ldaps://directory.example.org/dc=example,dc=org",
+                "dc=example,dc=org",
+            ),
+            contacts_settings(
+                "unknown",
+                "ldaps://directory.example.org",
+                "dc=example,dc=org",
+            ),
+        ] {
+            assert!(custom_contacts_account(settings, "user").is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn contacts_dbus_exposes_carddav_and_ldap_settings() {
+        use accounts_core::proxy::ContactsProxy;
+
+        let cases = [
+            (
+                contacts_settings("carddav", "https://dav.example.org/addressbooks/user/", ""),
+                "user",
+                CUSTOM_CARDDAV_PROVIDER,
+                "basic",
+            ),
+            (
+                contacts_settings(
+                    "ldap",
+                    "ldaps://directory.example.org:636",
+                    "dc=example,dc=org",
+                ),
+                "cn=reader,dc=example,dc=org",
+                CUSTOM_LDAP_PROVIDER,
+                "simple-bind",
+            ),
+        ];
+        for (settings, username, provider, auth_method) in cases {
+            let account = custom_contacts_account(settings.clone(), username).unwrap();
+            assert_eq!(account.provider, provider);
+            assert_eq!(account.username, username);
+            assert_eq!(account.services, [(Service::Contacts, true)].into());
+            let path = account_object_path(&account.id);
+            let server = zbus::connection::Builder::session()
+                .unwrap()
+                .serve_at(path.clone(), crate::services::ContactsService::new(account))
+                .unwrap()
+                .build()
+                .await
+                .unwrap();
+            let client = Connection::session().await.unwrap();
+            let contacts = ContactsProxy::builder(&client)
+                .destination(server.unique_name().unwrap().clone())
+                .unwrap()
+                .path(path)
+                .unwrap()
+                .build()
+                .await
+                .unwrap();
+
+            assert_eq!(contacts.uri().await.unwrap(), settings.uri);
+            assert_eq!(contacts.get_connection_settings().await.unwrap(), settings);
+            assert_eq!(contacts.auth_method().await.unwrap(), auth_method);
+        }
     }
 
     #[test]

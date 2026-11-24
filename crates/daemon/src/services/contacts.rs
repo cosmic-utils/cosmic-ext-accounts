@@ -1,6 +1,6 @@
 use accounts_core::{
     AccountService,
-    models::{Account, Service},
+    models::{Account, ContactsConnectionSettings, Service},
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -25,11 +25,20 @@ impl ContactsService {
     }
 }
 
+pub(crate) fn contacts_auth_method(account: &Account) -> &'static str {
+    match &account.custom_contacts {
+        Some(settings) if settings.protocol == "ldap" => "simple-bind",
+        Some(_) => "basic",
+        None => "oauth2",
+    }
+}
+
 #[interface(name = "dev.edfloreshz.Accounts.Endpoint.Contacts")]
 impl ContactsService {
-    /// CardDAV collection/principal URL.
-    #[zbus(property)]
-    async fn uri(&self) -> Result<String> {
+    async fn get_connection_settings(&self) -> Result<ContactsConnectionSettings> {
+        if let Some(settings) = &self.account.custom_contacts {
+            return Ok(settings.clone());
+        }
         let manifest = provider_manifest(&self.account)?;
         let endpoint = manifest.endpoint.contacts.as_ref().ok_or_else(|| {
             Error::Failed(format!(
@@ -37,12 +46,22 @@ impl ContactsService {
                 self.account.provider
             ))
         })?;
-        Ok(endpoint.resolve(&account_identity(&self.account)))
+        Ok(ContactsConnectionSettings {
+            protocol: "carddav".into(),
+            uri: endpoint.resolve(&account_identity(&self.account)),
+            base_dn: String::new(),
+        })
+    }
+
+    /// CardDAV collection URL or the LDAPS server URL.
+    #[zbus(property)]
+    async fn uri(&self) -> Result<String> {
+        Ok(self.get_connection_settings().await?.uri)
     }
 
     #[zbus(property)]
     async fn auth_method(&self) -> Result<String> {
-        Ok("oauth2".to_string())
+        Ok(contacts_auth_method(&self.account).into())
     }
 }
 

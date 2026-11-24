@@ -31,6 +31,7 @@ fn handler_credential(blob: Vec<u8>) -> Credential {
 pub(crate) enum PasswordKind {
     Mail,
     CalDav,
+    Contacts,
 }
 
 impl PasswordKind {
@@ -38,6 +39,7 @@ impl PasswordKind {
         match self {
             Self::Mail => "mail-password",
             Self::CalDav => "caldav-password",
+            Self::Contacts => "contacts-password",
         }
     }
 }
@@ -249,6 +251,7 @@ impl AuthManager {
                 services: manifest.default_services(),
                 custom_mail: None,
                 caldav_url: None,
+                custom_contacts: None,
             };
 
             self.storage
@@ -313,6 +316,7 @@ impl AuthManager {
                 services: manifest.default_services(),
                 custom_mail: None,
                 caldav_url: None,
+                custom_contacts: None,
             };
             self.storage
                 .set_account_credentials(&account.id, &credentials)

@@ -90,6 +90,15 @@ impl AccountsClient {
             None
         };
 
+        let custom_contacts = if matches!(
+            provider.as_str(),
+            crate::models::CUSTOM_CARDDAV_PROVIDER | crate::models::CUSTOM_LDAP_PROVIDER
+        ) {
+            Some(proxy.get_custom_contacts_settings().await?)
+        } else {
+            None
+        };
+
         Ok(Account {
             id,
             provider,
@@ -103,6 +112,7 @@ impl AccountsClient {
             services,
             custom_mail,
             caldav_url,
+            custom_contacts,
         })
     }
 }
@@ -166,6 +176,27 @@ impl AccountsClient {
         self.account_proxy(Self::account_path(id))
             .await?
             .set_caldav_password(password)
+            .await
+    }
+
+    pub async fn create_contacts_account(
+        &self,
+        settings: crate::models::ContactsConnectionSettings,
+        username: &str,
+        password: &str,
+    ) -> Result<Uuid> {
+        let path = self
+            .manager
+            .create_contacts_account(settings, username, password)
+            .await?;
+        let proxy = self.account_proxy(path).await?;
+        Uuid::parse_str(&proxy.id().await?).map_err(|err| zbus::fdo::Error::Failed(err.to_string()))
+    }
+
+    pub async fn set_contacts_password(&self, id: &Uuid, password: &str) -> Result<()> {
+        self.account_proxy(Self::account_path(id))
+            .await?
+            .set_contacts_password(password)
             .await
     }
 

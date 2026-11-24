@@ -19,6 +19,7 @@ account-exists = Konto które chcesz dodać istnieje
 
 # Buttons
 cancel = Anuluj
+back = Wstecz
 remove = Usuń
 
 # Menu

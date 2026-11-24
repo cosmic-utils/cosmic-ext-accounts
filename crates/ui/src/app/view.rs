@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::app::{AppModel, Message};
+use crate::app::{AppModel, DialogPage, Message, ServerAccountKind};
 use crate::fl;
 use accounts_core::Local;
 use accounts_core::models::{
-    Account, CUSTOM_CALDAV_PROVIDER, CUSTOM_MAIL_PROVIDER, IconSource, Service,
+    Account, CUSTOM_CALDAV_PROVIDER, CUSTOM_CARDDAV_PROVIDER, CUSTOM_LDAP_PROVIDER,
+    CUSTOM_MAIL_PROVIDER, IconSource, Service,
 };
 use chrono::{DateTime, Utc};
 use cosmic::iced::alignment::Horizontal;
@@ -54,7 +55,7 @@ impl AppModel {
             .align_x(Alignment::Center)
             .spacing(spacing().space_s);
 
-        widget::Column::new()
+        let content = widget::column([])
             .push(header)
             .push(
                 self.provider_list()
@@ -64,8 +65,13 @@ impl AppModel {
             .align_x(Alignment::Center)
             .spacing(spacing().space_l)
             .apply(widget::container)
+            .center_x(Length::Fill)
+            .padding(spacing().space_l);
+
+        widget::scrollable(content)
+            .height(Length::Shrink)
+            .apply(widget::container)
             .center(Length::Fill)
-            .padding(spacing().space_l)
             .into()
     }
 
@@ -132,7 +138,24 @@ impl AppModel {
             (
                 fl!("caldav-update-password"),
                 fl!("caldav-update-password"),
-                Message::OpenDialog(super::DialogPage::CalDav(Some(account.id))),
+                Message::OpenDialog(DialogPage::ServerAccount(
+                    ServerAccountKind::CalDav,
+                    Some(account.id),
+                )),
+            )
+        } else if matches!(
+            account.provider.as_str(),
+            CUSTOM_CARDDAV_PROVIDER | CUSTOM_LDAP_PROVIDER
+        ) {
+            let kind = if account.provider == CUSTOM_LDAP_PROVIDER {
+                ServerAccountKind::Ldap
+            } else {
+                ServerAccountKind::CardDav
+            };
+            (
+                fl!("contacts-update-password"),
+                fl!("contacts-update-password"),
+                Message::OpenDialog(DialogPage::ServerAccount(kind, Some(account.id))),
             )
         } else if account.provider == CUSTOM_MAIL_PROVIDER {
             (
@@ -265,6 +288,23 @@ impl AppModel {
                 widget::text::body(url.as_str()),
             ));
         }
+        if let Some(settings) = &account.custom_contacts {
+            let ldap = account.provider == CUSTOM_LDAP_PROVIDER;
+            section = section.add(widget::settings::flex_item(
+                if ldap {
+                    fl!("ldap-server-url")
+                } else {
+                    fl!("carddav-server-url")
+                },
+                widget::text::body(settings.uri.as_str()),
+            ));
+            if ldap {
+                section = section.add(widget::settings::flex_item(
+                    fl!("ldap-base-dn"),
+                    widget::text::body(settings.base_dn.as_str()),
+                ));
+            }
+        }
         section.into()
     }
 
@@ -304,16 +344,41 @@ impl AppModel {
                 self.provider_icon(CUSTOM_CALDAV_PROVIDER, 32),
                 fl!("caldav-title"),
                 "go-next-symbolic",
-                Message::OpenDialog(super::DialogPage::CalDav(None)),
+                Message::OpenDialog(DialogPage::ServerAccount(ServerAccountKind::CalDav, None)),
             ));
+            for (kind, provider, label) in [
+                (
+                    ServerAccountKind::CardDav,
+                    CUSTOM_CARDDAV_PROVIDER,
+                    fl!("carddav-title"),
+                ),
+                (
+                    ServerAccountKind::Ldap,
+                    CUSTOM_LDAP_PROVIDER,
+                    fl!("ldap-title"),
+                ),
+            ] {
+                rows.push(provider_row(
+                    self.provider_icon(provider, 32),
+                    label,
+                    "go-next-symbolic",
+                    Message::OpenDialog(DialogPage::ServerAccount(kind, None)),
+                ));
+            }
         }
-        widget::Column::with_children(rows)
+        widget::column::with_children(rows)
             .spacing(spacing().space_xs)
             .width(Length::Fill)
             .into()
     }
 
     pub(super) fn provider_name(&self, provider_id: &str) -> String {
+        if provider_id == CUSTOM_CARDDAV_PROVIDER {
+            return fl!("carddav-provider-name");
+        }
+        if provider_id == CUSTOM_LDAP_PROVIDER {
+            return fl!("ldap-provider-name");
+        }
         if provider_id == CUSTOM_CALDAV_PROVIDER {
             return fl!("caldav-provider-name");
         }
@@ -417,6 +482,9 @@ fn bundled_provider_icon(provider_id: &str) -> widget::icon::Handle {
         "microsoft" => widget::icon::from_raster_bytes(MICROSOFT_ICON),
         CUSTOM_MAIL_PROVIDER => widget::icon::from_svg_bytes(MAIL_ICON),
         CUSTOM_CALDAV_PROVIDER => widget::icon::from_svg_bytes(CALENDAR_ICON),
+        CUSTOM_CARDDAV_PROVIDER | CUSTOM_LDAP_PROVIDER => {
+            widget::icon::from_name("x-office-address-book-symbolic").into()
+        }
         _ => widget::icon::from_name("network-server-symbolic").into(),
     }
 }

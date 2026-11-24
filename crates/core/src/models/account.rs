@@ -7,6 +7,8 @@ use zbus::zvariant::{DeserializeDict, SerializeDict, Type};
 
 use crate::models::{Provider, Service};
 
+pub const CUSTOM_CARDDAV_PROVIDER: &str = "custom-carddav";
+pub const CUSTOM_LDAP_PROVIDER: &str = "custom-ldap";
 pub const CUSTOM_CALDAV_PROVIDER: &str = "custom-caldav";
 pub const CUSTOM_MAIL_PROVIDER: &str = "custom-mail";
 
@@ -17,6 +19,14 @@ pub struct CustomMailSettings {
     pub smtp_host: String,
     pub smtp_port: u16,
     pub smtp_starttls: bool,
+}
+
+/// Directory settings. The base DN is empty for CardDAV.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Type)]
+pub struct ContactsConnectionSettings {
+    pub protocol: String,
+    pub uri: String,
+    pub base_dn: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -34,6 +44,8 @@ pub struct Account {
     pub custom_mail: Option<CustomMailSettings>,
     #[serde(default)]
     pub caldav_url: Option<String>,
+    #[serde(default)]
+    pub custom_contacts: Option<ContactsConnectionSettings>,
 }
 
 impl Account {
@@ -118,6 +130,7 @@ impl From<DbusAccount> for Account {
                 .unwrap(),
             custom_mail: None,
             caldav_url: None,
+            custom_contacts: None,
             services: value
                 .services
                 .into_iter()

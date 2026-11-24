@@ -75,6 +75,9 @@ impl CredentialsInterface {
         let method = match account {
             Some(account) if account.caldav_url.is_some() => "basic",
             Some(account) if account.custom_mail.is_some() => "password",
+            Some(account) if account.custom_contacts.is_some() => {
+                crate::services::contacts_auth_method(&account)
+            }
             _ => "oauth2",
         };
         Ok(method.into())
@@ -160,6 +163,39 @@ impl CredentialsInterface {
                 TokenError::NeedsReauth("Update the password in COSMIC Accounts".into())
             })?;
         Ok((url, account.username, password))
+    }
+
+    async fn get_contact_access(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &zbus::Connection,
+    ) -> std::result::Result<
+        (
+            accounts_core::models::ContactsConnectionSettings,
+            String,
+            String,
+        ),
+        TokenError,
+    > {
+        let account = self.enabled_account(&Service::Contacts).await?;
+        if account.custom_contacts.is_none() {
+            return Err(TokenError::Disabled(
+                "This is not a custom contacts account".into(),
+            ));
+        }
+        self.authorize(header, connection, "Contacts").await?;
+        let auth = self.auth_manager.lock().await;
+        let account = self.enabled_account(&Service::Contacts).await?;
+        let settings = account
+            .custom_contacts
+            .ok_or_else(|| TokenError::Disabled("This is not a custom contacts account".into()))?;
+        let password = auth
+            .account_password(&self.id, crate::auth::PasswordKind::Contacts)
+            .await
+            .map_err(|_| {
+                TokenError::NeedsReauth("Update the password in COSMIC Accounts".into())
+            })?;
+        Ok((settings, account.username, password))
     }
 
     /// Force a refresh on the next token request after a provider returns 401.
@@ -261,7 +297,10 @@ impl CredentialsInterface {
         oauth_only: bool,
     ) -> std::result::Result<(String, i64), TokenError> {
         let mut account = self.authorize(header, connection, service).await?;
-        if account.custom_mail.is_some() || account.caldav_url.is_some() {
+        if account.custom_mail.is_some()
+            || account.caldav_url.is_some()
+            || account.custom_contacts.is_some()
+        {
             return Err(TokenError::Disabled(
                 "This account uses password authentication".into(),
             ));

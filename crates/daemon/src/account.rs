@@ -310,9 +310,35 @@ impl AccountInterface {
             })
     }
 
+    async fn get_custom_contacts_settings(
+        &self,
+    ) -> Result<accounts_core::models::ContactsConnectionSettings> {
+        self.current().await?.custom_contacts.ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("This is not a custom contacts account".into())
+        })
+    }
+
+    async fn set_contacts_password(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        password: &str,
+    ) -> Result<()> {
+        self.authorize_manage(Some(&header)).await?;
+        crate::manager::validate_password(password)?;
+        let auth = self.auth_manager.lock().await;
+        self.get_custom_contacts_settings().await?;
+        auth.set_account_password(&self.id, crate::auth::PasswordKind::Contacts, password)
+            .await
+            .map_err(|_| {
+                zbus::fdo::Error::Failed(
+                    "Could not save the contacts password to the keyring".into(),
+                )
+            })
+    }
+
     async fn reauthenticate(&self) -> Result<OwnedObjectPath> {
         let account = self.current().await?;
-        if account.caldav_url.is_some() {
+        if account.caldav_url.is_some() || account.custom_contacts.is_some() {
             return Err(zbus::fdo::Error::NotSupported(
                 "Update the account password instead".into(),
             ));
@@ -387,6 +413,11 @@ impl AccountInterface {
         if account.caldav_url.is_some() && service != Service::Calendar {
             return Err(zbus::fdo::Error::NotSupported(
                 "Custom CalDAV accounts only support Calendar".into(),
+            ));
+        }
+        if account.custom_contacts.is_some() && service != Service::Contacts {
+            return Err(zbus::fdo::Error::NotSupported(
+                "Custom directory accounts only support Contacts".into(),
             ));
         }
         account.services.insert(service.clone(), enabled);

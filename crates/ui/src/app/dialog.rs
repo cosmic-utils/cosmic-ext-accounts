@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use crate::app::{
-    AppModel, Message,
+    AppModel, Message, ServerAccountKind,
     custom_mail::{AccountPassword, MailField},
 };
 use crate::fl;
@@ -16,7 +16,7 @@ pub enum DialogPage {
     /// Lets the user pick which provider to sign in with.
     AddAccount,
     CustomMail(Option<Uuid>),
-    CalDav(Option<Uuid>),
+    ServerAccount(ServerAccountKind, Option<Uuid>),
     /// Waits for a sign-in that is happening in the browser, for the given provider.
     SigningIn(String),
     /// Confirms removal of the account with the given id and label.
@@ -29,14 +29,16 @@ impl DialogPage {
             DialogPage::AddAccount => widget::dialog()
                 .title(fl!("add-account-title"))
                 .body(fl!("add-account-body"))
-                .control(app.provider_list())
+                .control(widget::scrollable(app.provider_list()))
                 .primary_action(
                     widget::button::standard(fl!("cancel")).on_press(Message::CloseDialog),
                 )
                 .into(),
 
             DialogPage::CustomMail(existing) => app.custom_mail_dialog(*existing),
-            DialogPage::CalDav(existing) => app.caldav_dialog(*existing),
+            DialogPage::ServerAccount(kind, existing) => {
+                app.server_account_dialog(*kind, *existing)
+            }
 
             DialogPage::SigningIn(provider) => {
                 let provider_name = app.provider_name(provider);
@@ -177,6 +179,8 @@ impl AppModel {
         if let Some(error) = &self.custom_error {
             fields = fields.push(widget::text::body(error.as_str()));
         }
+        let fields: Element<'a, Message> = fields.into();
+
         widget::dialog()
             .title(if existing.is_some() {
                 fl!("custom-mail-update-password")
@@ -184,21 +188,29 @@ impl AppModel {
                 fl!("custom-mail-title")
             })
             .max_width(520)
-            .control(widget::scrollable(fields).height(Length::Shrink))
+            .control(if existing.is_some() {
+                fields
+            } else {
+                widget::scrollable(fields).into()
+            })
             .primary_action(
                 widget::button::suggested(fl!("custom-mail-save"))
                     .on_press_maybe(editable.then_some(Message::SaveCustomMail(existing))),
             )
             .secondary_action(
-                widget::button::standard(fl!("cancel"))
+                widget::button::standard(fl!("back"))
                     .on_press_maybe(editable.then_some(Message::CloseDialog)),
             )
             .into()
     }
 
-    fn caldav_dialog<'a>(&'a self, existing: Option<Uuid>) -> Element<'a, Message> {
+    fn server_account_dialog<'a>(
+        &'a self,
+        kind: ServerAccountKind,
+        existing: Option<Uuid>,
+    ) -> Element<'a, Message> {
         let editable = !self.saving_custom;
-        let form = &self.caldav_form;
+        let form = &self.server_form;
         let row = |label, input: Element<'a, Message>| {
             widget::settings::item_row(vec![
                 widget::text::body(label)
@@ -207,25 +219,48 @@ impl AppModel {
                 input,
             ])
         };
+        let (add_title, url_label, url_hint) = match kind {
+            ServerAccountKind::CalDav => {
+                (fl!("caldav-title"), fl!("caldav-server-url"), "https://")
+            }
+            ServerAccountKind::CardDav => {
+                (fl!("carddav-title"), fl!("carddav-server-url"), "https://")
+            }
+            ServerAccountKind::Ldap => (fl!("ldap-title"), fl!("ldap-server-url"), "ldaps://"),
+        };
         let mut section = widget::settings::section();
         if existing.is_none() {
             section = section
                 .add(row(
-                    fl!("caldav-server-url"),
-                    widget::text_input("https://", &form.url)
+                    url_label,
+                    widget::text_input(url_hint, &form.url)
                         .width(Length::FillPortion(3))
                         .editing(editable)
-                        .on_input(Message::ChangeCalDavUrl)
+                        .on_input(Message::ChangeServerUrl)
                         .into(),
                 ))
                 .add(row(
-                    fl!("custom-mail-username"),
+                    if kind == ServerAccountKind::Ldap {
+                        fl!("ldap-bind-identity")
+                    } else {
+                        fl!("custom-mail-username")
+                    },
                     widget::text_input("", &form.username)
                         .width(Length::FillPortion(3))
                         .editing(editable)
-                        .on_input(Message::ChangeCalDavUsername)
+                        .on_input(Message::ChangeServerUsername)
                         .into(),
                 ));
+            if kind == ServerAccountKind::Ldap {
+                section = section.add(row(
+                    fl!("ldap-base-dn"),
+                    widget::text_input("", &form.base_dn)
+                        .width(Length::FillPortion(3))
+                        .editing(editable)
+                        .on_input(Message::ChangeServerBaseDn)
+                        .into(),
+                ));
+            }
         }
         section = section.add(row(
             fl!("custom-mail-password"),
@@ -237,7 +272,7 @@ impl AppModel {
             )
             .width(Length::FillPortion(3))
             .editing(editable)
-            .on_input(|value| Message::ChangeCalDavPassword(AccountPassword(value)))
+            .on_input(|value| Message::ChangeServerPassword(AccountPassword(value)))
             .into(),
         ));
         let mut fields = widget::column::with_capacity(2)
@@ -246,20 +281,30 @@ impl AppModel {
         if let Some(error) = &self.custom_error {
             fields = fields.push(widget::text::body(error.as_str()));
         }
+        let fields: Element<'a, Message> = fields.into();
+
         widget::dialog()
             .title(if existing.is_some() {
-                fl!("caldav-update-password")
+                if kind == ServerAccountKind::CalDav {
+                    fl!("caldav-update-password")
+                } else {
+                    fl!("contacts-update-password")
+                }
             } else {
-                fl!("caldav-title")
+                add_title
             })
             .max_width(520)
-            .control(widget::scrollable(fields).height(Length::Shrink))
+            .control(if existing.is_some() {
+                fields
+            } else {
+                widget::scrollable(fields).into()
+            })
             .primary_action(
                 widget::button::suggested(fl!("custom-mail-save"))
-                    .on_press_maybe(editable.then_some(Message::SaveCalDav(existing))),
+                    .on_press_maybe(editable.then_some(Message::SaveServerAccount(kind, existing))),
             )
             .secondary_action(
-                widget::button::standard(fl!("cancel"))
+                widget::button::standard(fl!("back"))
                     .on_press_maybe(editable.then_some(Message::CloseDialog)),
             )
             .into()

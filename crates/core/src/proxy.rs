@@ -33,6 +33,13 @@ pub trait Manager {
         password: &str,
     ) -> Result<OwnedObjectPath>;
 
+    async fn create_contacts_account(
+        &self,
+        settings: crate::models::ContactsConnectionSettings,
+        username: &str,
+        password: &str,
+    ) -> Result<OwnedObjectPath>;
+
     #[zbus(property)]
     fn version(&self) -> Result<String>;
 
@@ -122,6 +129,11 @@ pub trait Account {
     async fn get_caldav_url(&self) -> Result<String>;
     async fn set_caldav_password(&self, password: &str) -> Result<()>;
 
+    async fn get_custom_contacts_settings(
+        &self,
+    ) -> Result<crate::models::ContactsConnectionSettings>;
+    async fn set_contacts_password(&self, password: &str) -> Result<()>;
+
     async fn reauthenticate(&self) -> Result<OwnedObjectPath>;
 
     /// `a(sss)` of `(service, caller_identity, decision)`.
@@ -152,6 +164,11 @@ pub trait Credentials {
 
     /// Returns the HTTPS server URL, username, and password for a CalDAV account.
     async fn get_caldav_access(&self) -> Result<(String, String, String)>;
+
+    /// Returns the directory settings, username, and password after Contacts consent.
+    async fn get_contact_access(
+        &self,
+    ) -> Result<(crate::models::ContactsConnectionSettings, String, String)>;
 
     async fn invalidate_token(&self) -> Result<()>;
 }
@@ -206,7 +223,9 @@ pub trait Tasks {
     default_service = "dev.edfloreshz.Accounts"
 )]
 pub trait Contacts {
-    /// CardDAV collection/principal URL.
+    async fn get_connection_settings(&self) -> Result<crate::models::ContactsConnectionSettings>;
+
+    /// CardDAV collection/principal URL or the LDAPS server URL.
     #[zbus(property)]
     fn uri(&self) -> Result<String>;
     #[zbus(property)]

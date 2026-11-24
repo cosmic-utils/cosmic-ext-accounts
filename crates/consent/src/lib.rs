@@ -164,6 +164,11 @@ impl cosmic::Application for Prompt {
                 "{} is asking for the saved calendar password. Only allow apps you trust with this password.",
                 p.caller_name,
             )
+        } else if matches!(p.provider_id.as_str(), "custom-carddav" | "custom-ldap") {
+            format!(
+                "{} is asking for the saved contacts password. Only allow apps you trust with this password.",
+                p.caller_name,
+            )
         } else {
             format!(
                 "{} wants to use {} with this {} account. The provider may grant the app access to other services on the same account.",

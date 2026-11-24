@@ -61,6 +61,7 @@ service-unavailable = Служба обліковок не працює
 
 # Buttons
 cancel = Скасувати
+back = Назад
 
 # Menu
 file = Файл

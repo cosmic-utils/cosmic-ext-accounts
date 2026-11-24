@@ -67,6 +67,20 @@ Basic authentication on the configured origin over TLS and keep credentials on t
 when following redirects. Revoking consent blocks future requests to Accounts. Rotate the
 password on your server to invalidate a copy an application already retrieved.
 
+## CardDAV and LDAP accounts
+
+Under **Add Other Account...**, choose **Add CardDAV account** or **Add LDAP account**.
+CardDAV uses an HTTPS URL, username, and password or app password. LDAP uses an
+`ldaps://` server URL, a bind username or distinguished name (DN), a separate search
+base DN, and a password. Accounts stores these passwords in the desktop keyring. Use
+**Update contacts password** on the account page to replace one.
+
+Contacts apps can read the protocol, server URL, and search base through
+`Endpoint.Contacts.GetConnectionSettings`. For custom accounts,
+`Credentials.GetContactAccess` returns those settings with the login and password
+after Contacts consent. Use HTTPS Basic authentication for CardDAV and a simple bind
+over TLS for LDAP, keeping credentials on the configured server.
+
 ## Mail clients
 
 Mail clients can discover supported transports through `Endpoint.Mail.GetConnectionSettings`.

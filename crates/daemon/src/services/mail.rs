@@ -199,6 +199,7 @@ mod tests {
             services: [(Service::Email, true)].into(),
             custom_mail: None,
             caldav_url: None,
+            custom_contacts: None,
         };
         let path = endpoint_object_path(&account);
         let server = zbus::connection::Builder::session()

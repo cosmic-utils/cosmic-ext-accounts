@@ -59,6 +59,7 @@ service-unavailable = The Accounts service is not running
 
 # Buttons
 cancel = Cancel
+back = Back
 
 # Menu
 file = File
@@ -97,3 +98,13 @@ caldav-title = Add CalDAV account
 caldav-provider-name = CalDAV
 caldav-server-url = CalDAV server URL
 caldav-update-password = Update calendar password
+
+carddav-title = Add CardDAV account
+carddav-provider-name = CardDAV
+carddav-server-url = CardDAV server URL
+ldap-title = Add LDAP account
+ldap-provider-name = LDAP
+ldap-server-url = LDAPS server URL
+ldap-bind-identity = Bind username or DN
+ldap-base-dn = Search base DN
+contacts-update-password = Update contacts password
