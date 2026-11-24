@@ -43,6 +43,9 @@ fn main() -> cosmic::iced::Result {
                 .min_height(360.0),
         );
 
-    let add_account = mode.as_deref() == Some(std::ffi::OsStr::new("--add-account"));
+    let add_account = matches!(
+        mode.as_deref().and_then(std::ffi::OsStr::to_str),
+        Some("--add-account" | "cosmic-accounts://add-account")
+    );
     cosmic::app::run::<app::AppModel>(settings, add_account)
 }
