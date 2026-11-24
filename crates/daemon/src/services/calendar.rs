@@ -31,6 +31,9 @@ impl CalendarService {
     /// calendars underneath via a normal CalDAV PROPFIND.
     #[zbus(property)]
     async fn uri(&self) -> Result<String> {
+        if let Some(url) = &self.account.caldav_url {
+            return Ok(url.clone());
+        }
         let manifest = provider_manifest(&self.account)?;
         let endpoint = manifest.endpoint.calendar.as_ref().ok_or_else(|| {
             Error::Failed(format!(
@@ -43,7 +46,12 @@ impl CalendarService {
 
     #[zbus(property)]
     async fn auth_method(&self) -> Result<String> {
-        Ok("oauth2".to_string())
+        Ok(if self.account.caldav_url.is_some() {
+            "basic"
+        } else {
+            "oauth2"
+        }
+        .into())
     }
 }
 

@@ -5,11 +5,11 @@ use accounts_core::models::CustomMailSettings;
 use crate::fl;
 
 #[derive(Clone, Default)]
-pub struct MailPassword(pub String);
+pub struct AccountPassword(pub String);
 
-impl std::fmt::Debug for MailPassword {
+impl std::fmt::Debug for AccountPassword {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt.write_str("MailPassword([redacted])")
+        fmt.write_str("AccountPassword([redacted])")
     }
 }
 
@@ -31,7 +31,7 @@ pub(super) struct MailForm {
     pub smtp_host: String,
     pub smtp_port: String,
     pub smtp_starttls: bool,
-    pub password: MailPassword,
+    pub password: AccountPassword,
 }
 
 impl Default for MailForm {
@@ -44,7 +44,7 @@ impl Default for MailForm {
             smtp_host: String::new(),
             smtp_port: "587".into(),
             smtp_starttls: true,
-            password: MailPassword::default(),
+            password: AccountPassword::default(),
         }
     }
 }

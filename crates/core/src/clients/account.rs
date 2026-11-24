@@ -84,6 +84,12 @@ impl AccountsClient {
             None
         };
 
+        let caldav_url = if provider == crate::models::CUSTOM_CALDAV_PROVIDER {
+            Some(proxy.get_caldav_url().await?)
+        } else {
+            None
+        };
+
         Ok(Account {
             id,
             provider,
@@ -96,6 +102,7 @@ impl AccountsClient {
             last_used: chrono::DateTime::from_str(&last_used).ok(),
             services,
             custom_mail,
+            caldav_url,
         })
     }
 }
@@ -138,6 +145,27 @@ impl AccountsClient {
         self.account_proxy(Self::account_path(id))
             .await?
             .set_mail_password(password)
+            .await
+    }
+
+    pub async fn create_caldav_account(
+        &self,
+        url: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<Uuid> {
+        let path = self
+            .manager
+            .create_caldav_account(url, username, password)
+            .await?;
+        let proxy = self.account_proxy(path).await?;
+        Uuid::parse_str(&proxy.id().await?).map_err(|err| zbus::fdo::Error::Failed(err.to_string()))
+    }
+
+    pub async fn set_caldav_password(&self, id: &Uuid, password: &str) -> Result<()> {
+        self.account_proxy(Self::account_path(id))
+            .await?
+            .set_caldav_password(password)
             .await
     }
 

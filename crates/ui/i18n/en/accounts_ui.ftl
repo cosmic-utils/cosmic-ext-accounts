@@ -91,4 +91,9 @@ custom-mail-password-hint = Password or app password
 custom-mail-save = Save
 custom-mail-invalid-port = Enter server ports between 1 and 65535.
 custom-mail-update-password = Update mail password
-custom-mail-password-saved = Mail password updated
+custom-account-password-saved = Password updated
+
+caldav-title = Add CalDAV account
+caldav-provider-name = CalDAV
+caldav-server-url = CalDAV server URL
+caldav-update-password = Update calendar password

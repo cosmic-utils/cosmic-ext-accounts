@@ -274,22 +274,49 @@ impl AccountInterface {
         password: &str,
     ) -> Result<()> {
         self.authorize_manage(Some(&header)).await?;
-        crate::manager::validate_mail_password(password)?;
+        crate::manager::validate_password(password)?;
         let auth = self.auth_manager.lock().await;
         if self.current().await?.custom_mail.is_none() {
             return Err(zbus::fdo::Error::NotSupported(
                 "This account uses OAuth".into(),
             ));
         }
-        auth.set_mail_password(&self.id, password)
+        auth.set_account_password(&self.id, crate::auth::PasswordKind::Mail, password)
             .await
             .map_err(|_| {
                 zbus::fdo::Error::Failed("Could not save the mail password to the keyring".into())
             })
     }
 
+    async fn get_caldav_url(&self) -> Result<String> {
+        self.current().await?.caldav_url.ok_or_else(|| {
+            zbus::fdo::Error::NotSupported("This is not a custom CalDAV account".into())
+        })
+    }
+
+    async fn set_caldav_password(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        password: &str,
+    ) -> Result<()> {
+        self.authorize_manage(Some(&header)).await?;
+        crate::manager::validate_password(password)?;
+        let auth = self.auth_manager.lock().await;
+        self.get_caldav_url().await?;
+        auth.set_account_password(&self.id, crate::auth::PasswordKind::CalDav, password)
+            .await
+            .map_err(|_| {
+                zbus::fdo::Error::Failed("Could not save the CalDAV password to the keyring".into())
+            })
+    }
+
     async fn reauthenticate(&self) -> Result<OwnedObjectPath> {
         let account = self.current().await?;
+        if account.caldav_url.is_some() {
+            return Err(zbus::fdo::Error::NotSupported(
+                "Update the account password instead".into(),
+            ));
+        }
         create_request(
             account.provider,
             Some(self.id),
@@ -355,6 +382,11 @@ impl AccountInterface {
         if account.custom_mail.is_some() && service != Service::Email {
             return Err(zbus::fdo::Error::NotSupported(
                 "Custom mail accounts only support Email".into(),
+            ));
+        }
+        if account.caldav_url.is_some() && service != Service::Calendar {
+            return Err(zbus::fdo::Error::NotSupported(
+                "Custom CalDAV accounts only support Calendar".into(),
             ));
         }
         account.services.insert(service.clone(), enabled);

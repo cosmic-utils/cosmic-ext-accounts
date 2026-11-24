@@ -72,14 +72,12 @@ impl CredentialsInterface {
     #[zbus(property)]
     async fn auth_method(&self) -> Result<String> {
         let account = self.config.lock().await.get_account(&self.id);
-        Ok(
-            if account.is_some_and(|account| account.custom_mail.is_some()) {
-                "password"
-            } else {
-                "oauth2"
-            }
-            .into(),
-        )
+        let method = match account {
+            Some(account) if account.caldav_url.is_some() => "basic",
+            Some(account) if account.custom_mail.is_some() => "password",
+            _ => "oauth2",
+        };
+        Ok(method.into())
     }
 
     async fn get_access_token(
@@ -129,10 +127,39 @@ impl CredentialsInterface {
         let account = self.enabled_account(&Service::Email).await?;
         let settings = crate::services::mail_settings(&account)
             .map_err(|err| TokenError::Disabled(err.to_string()))?;
-        let password = auth.mail_password(&self.id).await.map_err(|_| {
-            TokenError::NeedsReauth("Update the password in COSMIC Accounts".into())
-        })?;
+        let password = auth
+            .account_password(&self.id, crate::auth::PasswordKind::Mail)
+            .await
+            .map_err(|_| {
+                TokenError::NeedsReauth("Update the password in COSMIC Accounts".into())
+            })?;
         Ok((settings, account.username, password))
+    }
+
+    async fn get_caldav_access(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &zbus::Connection,
+    ) -> std::result::Result<(String, String, String), TokenError> {
+        let account = self.enabled_account(&Service::Calendar).await?;
+        if account.caldav_url.is_none() {
+            return Err(TokenError::Disabled(
+                "This is not a custom CalDAV account".into(),
+            ));
+        }
+        self.authorize(header, connection, "Calendar").await?;
+        let auth = self.auth_manager.lock().await;
+        let account = self.enabled_account(&Service::Calendar).await?;
+        let url = account
+            .caldav_url
+            .ok_or_else(|| TokenError::Disabled("This is not a custom CalDAV account".into()))?;
+        let password = auth
+            .account_password(&self.id, crate::auth::PasswordKind::CalDav)
+            .await
+            .map_err(|_| {
+                TokenError::NeedsReauth("Update the password in COSMIC Accounts".into())
+            })?;
+        Ok((url, account.username, password))
     }
 
     /// Force a refresh on the next token request after a provider returns 401.
@@ -234,9 +261,9 @@ impl CredentialsInterface {
         oauth_only: bool,
     ) -> std::result::Result<(String, i64), TokenError> {
         let mut account = self.authorize(header, connection, service).await?;
-        if account.custom_mail.is_some() {
+        if account.custom_mail.is_some() || account.caldav_url.is_some() {
             return Err(TokenError::Disabled(
-                "This account uses a mail password".into(),
+                "This account uses password authentication".into(),
             ));
         }
         let force_refresh = self.stale.lock().await.remove(&self.id);

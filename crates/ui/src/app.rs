@@ -4,7 +4,7 @@ mod custom_mail;
 mod dialog;
 mod view;
 
-use custom_mail::{MailField, MailForm, MailPassword};
+use custom_mail::{AccountPassword, MailField, MailForm};
 use view::caller_label;
 
 use crate::fl;
@@ -43,9 +43,17 @@ pub struct AppModel {
     grants: Vec<(String, String, String)>,
     pending_auth: Option<PendingAuth>,
     mail_form: MailForm,
-    saving_mail: bool,
-    mail_error: Option<String>,
+    caldav_form: CalDavForm,
+    saving_custom: bool,
+    custom_error: Option<String>,
     other_accounts_expanded: bool,
+}
+
+#[derive(Default)]
+struct CalDavForm {
+    url: String,
+    username: String,
+    password: AccountPassword,
 }
 
 struct PendingAuth {
@@ -86,10 +94,14 @@ pub enum Message {
 
     ToggleOtherAccounts,
     ChangeMailField(MailField, String),
-    ChangeMailPassword(MailPassword),
+    ChangeMailPassword(AccountPassword),
     ChangeMailStarttls(bool),
     SaveCustomMail(Option<Uuid>),
-    CustomMailSaved(Result<Option<Uuid>, String>),
+    ChangeCalDavUrl(String),
+    ChangeCalDavUsername(String),
+    ChangeCalDavPassword(AccountPassword),
+    SaveCalDav(Option<Uuid>),
+    CustomAccountSaved(Result<Option<Uuid>, String>),
 
     // Sign-in
     StartAuth(String, Option<Uuid>),
@@ -139,8 +151,9 @@ impl cosmic::Application for AppModel {
             grants: Vec::new(),
             pending_auth: None,
             mail_form: MailForm::default(),
-            saving_mail: false,
-            mail_error: None,
+            caldav_form: CalDavForm::default(),
+            saving_custom: false,
+            custom_error: None,
             other_accounts_expanded: false,
         };
 
@@ -322,11 +335,12 @@ impl cosmic::Application for AppModel {
                 }
             }
             Message::OpenDialog(page) => {
-                if self.saving_mail {
+                if self.saving_custom {
                     return Task::none();
                 }
                 self.mail_form = MailForm::default();
-                self.mail_error = None;
+                self.caldav_form = CalDavForm::default();
+                self.custom_error = None;
                 if matches!(page, DialogPage::AddAccount) {
                     self.other_accounts_expanded = false;
                 }
@@ -334,9 +348,10 @@ impl cosmic::Application for AppModel {
                 self.dialog_pages.push_back(page);
             }
             Message::CloseDialog => {
-                if !self.saving_mail {
+                if !self.saving_custom {
                     self.mail_form = MailForm::default();
-                    self.mail_error = None;
+                    self.caldav_form = CalDavForm::default();
+                    self.custom_error = None;
                     self.dialog_pages.pop_front();
                 }
             }
@@ -610,18 +625,18 @@ impl cosmic::Application for AppModel {
                 self.mail_form.smtp_starttls = starttls;
             }
             Message::SaveCustomMail(existing) => {
-                if self.saving_mail {
+                if self.saving_custom {
                     return Task::none();
                 }
                 let Some(client) = self.client.clone() else {
-                    self.mail_error = Some(fl!("service-unavailable"));
+                    self.custom_error = Some(fl!("service-unavailable"));
                     return Task::none();
                 };
                 let settings = if existing.is_none() {
                     match self.mail_form.settings() {
                         Ok(settings) => Some(settings),
                         Err(error) => {
-                            self.mail_error = Some(error);
+                            self.custom_error = Some(error);
                             return Task::none();
                         }
                     }
@@ -631,8 +646,8 @@ impl cosmic::Application for AppModel {
                 let email = self.mail_form.email.clone();
                 let username = self.mail_form.username.clone();
                 let password = self.mail_form.password.clone();
-                self.saving_mail = true;
-                self.mail_error = None;
+                self.saving_custom = true;
+                self.custom_error = None;
                 tasks.push(Task::perform(
                     async move {
                         let result = match (existing, settings) {
@@ -648,11 +663,45 @@ impl cosmic::Application for AppModel {
                         };
                         result.map_err(|err| err.to_string())
                     },
-                    |result| cosmic::action::app(Message::CustomMailSaved(result)),
+                    |result| cosmic::action::app(Message::CustomAccountSaved(result)),
                 ));
             }
-            Message::CustomMailSaved(result) => {
-                self.saving_mail = false;
+            Message::ChangeCalDavUrl(url) => self.caldav_form.url = url,
+            Message::ChangeCalDavUsername(username) => self.caldav_form.username = username,
+            Message::ChangeCalDavPassword(password) => self.caldav_form.password = password,
+            Message::SaveCalDav(existing) => {
+                if self.saving_custom {
+                    return Task::none();
+                }
+                let Some(client) = self.client.clone() else {
+                    self.custom_error = Some(fl!("service-unavailable"));
+                    return Task::none();
+                };
+                let url = self.caldav_form.url.clone();
+                let username = self.caldav_form.username.clone();
+                let password = self.caldav_form.password.clone();
+                self.saving_custom = true;
+                self.custom_error = None;
+                tasks.push(Task::perform(
+                    async move {
+                        let result = if let Some(id) = existing {
+                            client
+                                .set_caldav_password(&id, &password.0)
+                                .await
+                                .map(|()| None)
+                        } else {
+                            client
+                                .create_caldav_account(&url, &username, &password.0)
+                                .await
+                                .map(Some)
+                        };
+                        result.map_err(|err| err.to_string())
+                    },
+                    |result| cosmic::action::app(Message::CustomAccountSaved(result)),
+                ));
+            }
+            Message::CustomAccountSaved(result) => {
+                self.saving_custom = false;
                 match result {
                     Ok(Some(id)) => {
                         tasks.push(self.update(Message::CloseDialog));
@@ -672,10 +721,10 @@ impl cosmic::Application for AppModel {
                     Ok(None) => {
                         tasks.push(self.update(Message::CloseDialog));
                         tasks.push(
-                            self.update(Message::ShowToast(fl!("custom-mail-password-saved"))),
+                            self.update(Message::ShowToast(fl!("custom-account-password-saved"))),
                         );
                     }
-                    Err(error) => self.mail_error = Some(error),
+                    Err(error) => self.custom_error = Some(error),
                 }
             }
             Message::StartAuth(provider, existing_account) => {

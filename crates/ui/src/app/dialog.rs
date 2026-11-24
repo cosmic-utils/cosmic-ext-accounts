@@ -2,7 +2,7 @@
 
 use crate::app::{
     AppModel, Message,
-    custom_mail::{MailField, MailPassword},
+    custom_mail::{AccountPassword, MailField},
 };
 use crate::fl;
 use accounts_core::Uuid;
@@ -16,6 +16,7 @@ pub enum DialogPage {
     /// Lets the user pick which provider to sign in with.
     AddAccount,
     CustomMail(Option<Uuid>),
+    CalDav(Option<Uuid>),
     /// Waits for a sign-in that is happening in the browser, for the given provider.
     SigningIn(String),
     /// Confirms removal of the account with the given id and label.
@@ -35,6 +36,7 @@ impl DialogPage {
                 .into(),
 
             DialogPage::CustomMail(existing) => app.custom_mail_dialog(*existing),
+            DialogPage::CalDav(existing) => app.caldav_dialog(*existing),
 
             DialogPage::SigningIn(provider) => {
                 let provider_name = app.provider_name(provider);
@@ -83,7 +85,7 @@ impl DialogPage {
 impl AppModel {
     fn custom_mail_dialog<'a>(&'a self, existing: Option<Uuid>) -> Element<'a, Message> {
         let form = &self.mail_form;
-        let editable = !self.saving_mail;
+        let editable = !self.saving_custom;
         let label = |text| widget::text::body(text).width(Length::FillPortion(2));
         let field = |placeholder: String, value: &'a str, field| {
             widget::text_input(placeholder, value)
@@ -115,7 +117,7 @@ impl AppModel {
             )
             .width(Length::FillPortion(3))
             .editing(editable)
-            .on_input(|value| Message::ChangeMailPassword(MailPassword(value)))
+            .on_input(|value| Message::ChangeMailPassword(AccountPassword(value)))
             .into(),
         );
         let mut fields = widget::column::with_capacity(4).spacing(spacing().space_s);
@@ -172,7 +174,7 @@ impl AppModel {
         } else {
             fields = fields.push(password);
         }
-        if let Some(error) = &self.mail_error {
+        if let Some(error) = &self.custom_error {
             fields = fields.push(widget::text::body(error.as_str()));
         }
         widget::dialog()
@@ -186,6 +188,75 @@ impl AppModel {
             .primary_action(
                 widget::button::suggested(fl!("custom-mail-save"))
                     .on_press_maybe(editable.then_some(Message::SaveCustomMail(existing))),
+            )
+            .secondary_action(
+                widget::button::standard(fl!("cancel"))
+                    .on_press_maybe(editable.then_some(Message::CloseDialog)),
+            )
+            .into()
+    }
+
+    fn caldav_dialog<'a>(&'a self, existing: Option<Uuid>) -> Element<'a, Message> {
+        let editable = !self.saving_custom;
+        let form = &self.caldav_form;
+        let row = |label, input: Element<'a, Message>| {
+            widget::settings::item_row(vec![
+                widget::text::body(label)
+                    .width(Length::FillPortion(2))
+                    .into(),
+                input,
+            ])
+        };
+        let mut section = widget::settings::section();
+        if existing.is_none() {
+            section = section
+                .add(row(
+                    fl!("caldav-server-url"),
+                    widget::text_input("https://", &form.url)
+                        .width(Length::FillPortion(3))
+                        .editing(editable)
+                        .on_input(Message::ChangeCalDavUrl)
+                        .into(),
+                ))
+                .add(row(
+                    fl!("custom-mail-username"),
+                    widget::text_input("", &form.username)
+                        .width(Length::FillPortion(3))
+                        .editing(editable)
+                        .on_input(Message::ChangeCalDavUsername)
+                        .into(),
+                ));
+        }
+        section = section.add(row(
+            fl!("custom-mail-password"),
+            widget::secure_input(
+                fl!("custom-mail-password-hint"),
+                &form.password.0,
+                None,
+                true,
+            )
+            .width(Length::FillPortion(3))
+            .editing(editable)
+            .on_input(|value| Message::ChangeCalDavPassword(AccountPassword(value)))
+            .into(),
+        ));
+        let mut fields = widget::column::with_capacity(2)
+            .spacing(spacing().space_s)
+            .push(section);
+        if let Some(error) = &self.custom_error {
+            fields = fields.push(widget::text::body(error.as_str()));
+        }
+        widget::dialog()
+            .title(if existing.is_some() {
+                fl!("caldav-update-password")
+            } else {
+                fl!("caldav-title")
+            })
+            .max_width(520)
+            .control(widget::scrollable(fields).height(Length::Shrink))
+            .primary_action(
+                widget::button::suggested(fl!("custom-mail-save"))
+                    .on_press_maybe(editable.then_some(Message::SaveCalDav(existing))),
             )
             .secondary_action(
                 widget::button::standard(fl!("cancel"))

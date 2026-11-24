@@ -27,6 +27,21 @@ fn handler_credential(blob: Vec<u8>) -> Credential {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum PasswordKind {
+    Mail,
+    CalDav,
+}
+
+impl PasswordKind {
+    fn token_type(self) -> &'static str {
+        match self {
+            Self::Mail => "mail-password",
+            Self::CalDav => "caldav-password",
+        }
+    }
+}
+
 struct PendingAuth {
     provider_id: String,
     verifier: PkceCodeVerifier,
@@ -233,6 +248,7 @@ impl AuthManager {
                 last_used: Some(Utc::now()),
                 services: manifest.default_services(),
                 custom_mail: None,
+                caldav_url: None,
             };
 
             self.storage
@@ -296,6 +312,7 @@ impl AuthManager {
                 last_used: Some(Utc::now()),
                 services: manifest.default_services(),
                 custom_mail: None,
+                caldav_url: None,
             };
             self.storage
                 .set_account_credentials(&account.id, &credentials)
@@ -473,7 +490,12 @@ impl AuthManager {
         Ok(())
     }
 
-    pub async fn set_mail_password(&self, id: &Uuid, password: &str) -> Result<()> {
+    pub(crate) async fn set_account_password(
+        &self,
+        id: &Uuid,
+        kind: PasswordKind,
+        password: &str,
+    ) -> Result<()> {
         self.storage
             .set_account_credentials(
                 id,
@@ -482,16 +504,16 @@ impl AuthManager {
                     refresh_token: None,
                     expires_at: None,
                     scope: Vec::new(),
-                    token_type: "mail-password".into(),
+                    token_type: kind.token_type().into(),
                     credential_blob: Some(password.as_bytes().to_vec()),
                 },
             )
             .await
     }
 
-    pub async fn mail_password(&self, id: &Uuid) -> Result<String> {
+    pub(crate) async fn account_password(&self, id: &Uuid, kind: PasswordKind) -> Result<String> {
         let credential = self.storage.get_account_credentials(id).await?;
-        if credential.token_type != "mail-password" {
+        if credential.token_type != kind.token_type() {
             return Err(Error::InvalidProviderConfig);
         }
         Ok(

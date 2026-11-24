@@ -3,7 +3,9 @@
 use crate::app::{AppModel, Message};
 use crate::fl;
 use accounts_core::Local;
-use accounts_core::models::{Account, CUSTOM_MAIL_PROVIDER, IconSource, Service};
+use accounts_core::models::{
+    Account, CUSTOM_CALDAV_PROVIDER, CUSTOM_MAIL_PROVIDER, IconSource, Service,
+};
 use chrono::{DateTime, Utc};
 use cosmic::iced::alignment::Horizontal;
 use cosmic::iced::{Alignment, Length};
@@ -15,6 +17,7 @@ const APP_ICON: &[u8] = include_bytes!("../../resources/icons/hicolor/scalable/a
 const GOOGLE_ICON: &[u8] = include_bytes!("../../resources/img/google.png");
 const MICROSOFT_ICON: &[u8] = include_bytes!("../../resources/img/microsoft.png");
 const MAIL_ICON: &[u8] = include_bytes!("../../resources/img/mail.svg");
+const CALENDAR_ICON: &[u8] = include_bytes!("../../resources/img/calendar.svg");
 
 const CONTENT_WIDTH: f32 = 720.0;
 const PROSE_WIDTH: f32 = 520.0;
@@ -125,8 +128,13 @@ impl AppModel {
     }
 
     fn account_section<'a>(&self, account: &'a Account) -> Element<'a, Message> {
-        let custom = account.provider == accounts_core::models::CUSTOM_MAIL_PROVIDER;
-        let (label, action, message) = if custom {
+        let (label, action, message) = if account.provider == CUSTOM_CALDAV_PROVIDER {
+            (
+                fl!("caldav-update-password"),
+                fl!("caldav-update-password"),
+                Message::OpenDialog(super::DialogPage::CalDav(Some(account.id))),
+            )
+        } else if account.provider == CUSTOM_MAIL_PROVIDER {
             (
                 fl!("custom-mail-update-password"),
                 fl!("custom-mail-update-password"),
@@ -251,6 +259,12 @@ impl AppModel {
                     widget::text::body(format!("{}:{}", settings.smtp_host, settings.smtp_port)),
                 ));
         }
+        if let Some(url) = &account.caldav_url {
+            section = section.add(widget::settings::flex_item(
+                fl!("caldav-server-url"),
+                widget::text::body(url.as_str()),
+            ));
+        }
         section.into()
     }
 
@@ -286,6 +300,12 @@ impl AppModel {
                 "go-next-symbolic",
                 Message::OpenDialog(super::DialogPage::CustomMail(None)),
             ));
+            rows.push(provider_row(
+                self.provider_icon(CUSTOM_CALDAV_PROVIDER, 32),
+                fl!("caldav-title"),
+                "go-next-symbolic",
+                Message::OpenDialog(super::DialogPage::CalDav(None)),
+            ));
         }
         widget::Column::with_children(rows)
             .spacing(spacing().space_xs)
@@ -294,6 +314,9 @@ impl AppModel {
     }
 
     pub(super) fn provider_name(&self, provider_id: &str) -> String {
+        if provider_id == CUSTOM_CALDAV_PROVIDER {
+            return fl!("caldav-provider-name");
+        }
         if provider_id == CUSTOM_MAIL_PROVIDER {
             return fl!("custom-mail-provider-name");
         }
@@ -393,6 +416,7 @@ fn bundled_provider_icon(provider_id: &str) -> widget::icon::Handle {
         "google" => widget::icon::from_raster_bytes(GOOGLE_ICON),
         "microsoft" => widget::icon::from_raster_bytes(MICROSOFT_ICON),
         CUSTOM_MAIL_PROVIDER => widget::icon::from_svg_bytes(MAIL_ICON),
+        CUSTOM_CALDAV_PROVIDER => widget::icon::from_svg_bytes(CALENDAR_ICON),
         _ => widget::icon::from_name("network-server-symbolic").into(),
     }
 }

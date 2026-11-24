@@ -54,6 +54,19 @@ In Mail, open **Settings → Mail accounts** and select **Link** next to the acc
 asks whether Mail may retrieve the password. Revoking access blocks new password requests.
 If you need to invalidate a password an app has already obtained, rotate it on your mail server.
 
+## CalDAV accounts
+
+Open **Add account → Add Other Account... → Add CalDAV account**. Enter the HTTPS CalDAV URL
+from your server, your username, and a password or app password. Accounts stores the password
+in your desktop keyring. Use **Update calendar password** on the account page to replace it.
+
+Calendar applications can discover the account and its `Endpoint.Calendar` URL and
+authentication method. For a custom account, `Credentials.GetCalDavAccess` returns the
+HTTPS URL, username, and password together after Calendar consent. Clients should use HTTP
+Basic authentication on the configured origin over TLS and keep credentials on that origin
+when following redirects. Revoking consent blocks future requests to Accounts. Rotate the
+password on your server to invalidate a copy an application already retrieved.
+
 ## Mail clients
 
 Mail clients can discover supported transports through `Endpoint.Mail.GetConnectionSettings`.

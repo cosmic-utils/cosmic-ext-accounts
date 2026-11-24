@@ -7,6 +7,7 @@ use zbus::zvariant::{DeserializeDict, SerializeDict, Type};
 
 use crate::models::{Provider, Service};
 
+pub const CUSTOM_CALDAV_PROVIDER: &str = "custom-caldav";
 pub const CUSTOM_MAIL_PROVIDER: &str = "custom-mail";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Type)]
@@ -31,6 +32,8 @@ pub struct Account {
     pub services: BTreeMap<Service, bool>,
     #[serde(default)]
     pub custom_mail: Option<CustomMailSettings>,
+    #[serde(default)]
+    pub caldav_url: Option<String>,
 }
 
 impl Account {
@@ -114,6 +117,7 @@ impl From<DbusAccount> for Account {
                 .map(|lu| DateTime::from_str(&lu).ok())
                 .unwrap(),
             custom_mail: None,
+            caldav_url: None,
             services: value
                 .services
                 .into_iter()

@@ -1,11 +1,11 @@
 use crate::{
     Error,
-    auth::AuthManager,
+    auth::{AuthManager, PasswordKind},
     request::{RequestInterface, RequestState, RequestStatus, request_object_path},
 };
 use accounts_core::{
     config::AccountsConfig,
-    models::{Account, CUSTOM_MAIL_PROVIDER, CustomMailSettings, Service},
+    models::{Account, CUSTOM_CALDAV_PROVIDER, CUSTOM_MAIL_PROVIDER, CustomMailSettings, Service},
 };
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
@@ -23,10 +23,10 @@ use zbus::{
 const REQUEST_GRACE_PERIOD: Duration = Duration::from_secs(5);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
-pub(crate) fn validate_mail_password(password: &str) -> Result<()> {
+pub(crate) fn validate_password(password: &str) -> Result<()> {
     if password.is_empty() || password.contains(['\r', '\n', '\0']) {
         return Err(zbus::fdo::Error::InvalidArgs(
-            "Enter a valid mail password".into(),
+            "Enter a valid password".into(),
         ));
     }
     Ok(())
@@ -71,6 +71,46 @@ fn custom_mail_account(
         last_used: None,
         services: [(Service::Email, true)].into(),
         custom_mail: Some(settings),
+        caldav_url: None,
+    })
+}
+
+fn custom_caldav_account(url: &str, username: &str) -> Result<Account> {
+    use zbus::fdo::Error;
+
+    let url = url::Url::parse(url.trim())
+        .ok()
+        .filter(|url| {
+            url.scheme() == "https"
+                && url.host().is_some()
+                && url.username().is_empty()
+                && url.password().is_none()
+                && url.query().is_none()
+                && url.fragment().is_none()
+        })
+        .ok_or_else(|| {
+            Error::InvalidArgs(
+                "Enter an HTTPS CalDAV URL without credentials, a query, or a fragment".into(),
+            )
+        })?;
+
+    let username = username.trim();
+    if username.is_empty() || username.contains(':') || username.chars().any(char::is_control) {
+        return Err(Error::InvalidArgs("Enter a valid CalDAV username".into()));
+    }
+
+    Ok(Account {
+        id: Uuid::new_v4(),
+        provider: CUSTOM_CALDAV_PROVIDER.into(),
+        display_name: username.into(),
+        username: username.into(),
+        email: None,
+        enabled: true,
+        created_at: chrono::Utc::now(),
+        last_used: None,
+        services: [(Service::Calendar, true)].into(),
+        custom_mail: None,
+        caldav_url: Some(url.into()),
     })
 }
 
@@ -111,6 +151,64 @@ impl ManagerInterface {
             config,
             auth_manager,
         }
+    }
+
+    async fn create_password_account(
+        &self,
+        header: Header<'_>,
+        connection: &Connection,
+        account: Account,
+        kind: PasswordKind,
+        password: &str,
+    ) -> Result<OwnedObjectPath> {
+        use zbus::fdo::Error;
+
+        if !crate::polkit::check(&header, crate::polkit::ACTION_MANAGE_OWN_ACCOUNTS).await {
+            return Err(Error::AccessDenied("Not authorized to add accounts".into()));
+        }
+        let grants = crate::GRANTS
+            .get()
+            .ok_or_else(|| Error::Failed("Accounts is starting".into()))?;
+        let stale = crate::STALE
+            .get()
+            .ok_or_else(|| Error::Failed("Accounts is starting".into()))?;
+        validate_password(password)?;
+
+        let auth = self.auth_manager.lock().await;
+        {
+            let mut config = self.config.lock().await;
+            if config.accounts.iter().any(|saved| {
+                saved.provider == account.provider
+                    && saved.username == account.username
+                    && saved.email == account.email
+                    && saved.custom_mail == account.custom_mail
+                    && saved.caldav_url == account.caldav_url
+            }) {
+                return Err(Error::InvalidArgs("That account already exists".into()));
+            }
+
+            auth.set_account_password(&account.id, kind, password)
+                .await
+                .map_err(|_| Error::Failed("Could not save the password to the keyring".into()))?;
+            if let Err(err) = config.save_account(&account) {
+                let _ = auth.delete_credentials(&account.id).await;
+                return Err(Error::Failed(err.to_string()));
+            }
+        }
+        let result = crate::register_new_account(
+            connection,
+            &self.config,
+            &self.auth_manager,
+            grants,
+            stale,
+            &account,
+        )
+        .await;
+        if result.is_err() {
+            let _ = self.config.lock().await.remove_account(&account.id);
+            let _ = auth.delete_credentials(&account.id).await;
+        }
+        result
     }
 }
 
@@ -162,57 +260,22 @@ impl ManagerInterface {
         settings: CustomMailSettings,
         password: &str,
     ) -> Result<OwnedObjectPath> {
-        use zbus::fdo::Error;
-
-        if !crate::polkit::check(&header, crate::polkit::ACTION_MANAGE_OWN_ACCOUNTS).await {
-            return Err(Error::AccessDenied("Not authorized to add accounts".into()));
-        }
-        let grants = crate::GRANTS
-            .get()
-            .ok_or_else(|| Error::Failed("Accounts is starting".into()))?;
-        let stale = crate::STALE
-            .get()
-            .ok_or_else(|| Error::Failed("Accounts is starting".into()))?;
         let account = custom_mail_account(email, username, settings)?;
-        validate_mail_password(password)?;
+        self.create_password_account(header, connection, account, PasswordKind::Mail, password)
+            .await
+    }
 
-        let auth = self.auth_manager.lock().await;
-        {
-            let mut config = self.config.lock().await;
-            if config.accounts.iter().any(|saved| {
-                saved.username == account.username
-                    && saved.email == account.email
-                    && saved.custom_mail == account.custom_mail
-            }) {
-                return Err(Error::InvalidArgs(
-                    "That mail account already exists".into(),
-                ));
-            }
-
-            auth.set_mail_password(&account.id, password)
-                .await
-                .map_err(|_| {
-                    Error::Failed("Could not save the mail password to the keyring".into())
-                })?;
-            if let Err(err) = config.save_account(&account) {
-                let _ = auth.delete_credentials(&account.id).await;
-                return Err(Error::Failed(err.to_string()));
-            }
-        }
-        let result = crate::register_new_account(
-            connection,
-            &self.config,
-            &self.auth_manager,
-            grants,
-            stale,
-            &account,
-        )
-        .await;
-        if result.is_err() {
-            let _ = self.config.lock().await.remove_account(&account.id);
-            let _ = auth.delete_credentials(&account.id).await;
-        }
-        result
+    async fn create_caldav_account(
+        &self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &Connection,
+        url: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<OwnedObjectPath> {
+        let account = custom_caldav_account(url, username)?;
+        self.create_password_account(header, connection, account, PasswordKind::CalDav, password)
+            .await
     }
 
     async fn create_account(
@@ -220,9 +283,9 @@ impl ManagerInterface {
         provider_id: &str,
         params: HashMap<String, String>,
     ) -> Result<OwnedObjectPath> {
-        if provider_id == CUSTOM_MAIL_PROVIDER {
+        if matches!(provider_id, CUSTOM_MAIL_PROVIDER | CUSTOM_CALDAV_PROVIDER) {
             return Err(zbus::fdo::Error::NotSupported(
-                "Use CreateMailAccount for custom mail".into(),
+                "Use the dedicated custom account method".into(),
             ));
         }
         let Some(registry) = crate::REGISTRY.get() else {
@@ -530,6 +593,60 @@ mod mail_tests {
     }
 
     #[test]
+    fn custom_caldav_accounts_are_calendar_only() {
+        let account = custom_caldav_account("https://dav.example.org/calendars/me/", "me").unwrap();
+        assert_eq!(account.provider, CUSTOM_CALDAV_PROVIDER);
+        assert_eq!(account.username, "me");
+        assert_eq!(account.services, [(Service::Calendar, true)].into());
+        assert_eq!(
+            account.caldav_url.as_deref(),
+            Some("https://dav.example.org/calendars/me/")
+        );
+    }
+
+    #[tokio::test]
+    async fn publishes_custom_caldav_endpoint_over_dbus() {
+        use accounts_core::proxy::CalendarProxy;
+
+        let url = "https://dav.example.org/calendars/me/";
+        let account = custom_caldav_account(url, "me").unwrap();
+        let path = account_object_path(&account.id);
+        let server = zbus::connection::Builder::session()
+            .unwrap()
+            .serve_at(path.clone(), crate::services::CalendarService::new(account))
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+        let client = Connection::session().await.unwrap();
+        let calendar = CalendarProxy::builder(&client)
+            .destination(server.unique_name().unwrap().clone())
+            .unwrap()
+            .path(path)
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+
+        assert_eq!(calendar.uri().await.unwrap(), url);
+        assert_eq!(calendar.auth_method().await.unwrap(), "basic");
+    }
+
+    #[test]
+    fn caldav_requires_an_https_url_without_embedded_secrets() {
+        for url in [
+            "http://dav.example.org/",
+            "https://me:password@dav.example.org/",
+            "https://dav.example.org/?token=fixture",
+            "https://dav.example.org/#fragment",
+        ] {
+            assert!(custom_caldav_account(url, "me").is_err(), "{url}");
+        }
+        assert!(custom_caldav_account("https://dav.example.org/", "").is_err());
+        assert!(custom_caldav_account("https://dav.example.org/", "me:other").is_err());
+    }
+
+    #[test]
     fn custom_mail_settings_are_email_only() {
         let account = custom_mail_account("person@example.com", "", settings()).unwrap();
         assert_eq!(account.provider, CUSTOM_MAIL_PROVIDER);
@@ -550,6 +667,6 @@ mod mail_tests {
         bad.smtp_port = 0;
         assert!(custom_mail_account("person@example.com", "", bad).is_err());
         assert!(custom_mail_account("no-address", "", settings()).is_err());
-        assert!(validate_mail_password("bad\r\n").is_err());
+        assert!(validate_password("bad\r\n").is_err());
     }
 }

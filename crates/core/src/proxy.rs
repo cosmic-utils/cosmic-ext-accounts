@@ -26,6 +26,13 @@ pub trait Manager {
         password: &str,
     ) -> Result<OwnedObjectPath>;
 
+    async fn create_caldav_account(
+        &self,
+        url: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<OwnedObjectPath>;
+
     #[zbus(property)]
     fn version(&self) -> Result<String>;
 
@@ -112,6 +119,9 @@ pub trait Account {
 
     async fn set_mail_password(&self, password: &str) -> Result<()>;
 
+    async fn get_caldav_url(&self) -> Result<String>;
+    async fn set_caldav_password(&self, password: &str) -> Result<()>;
+
     async fn reauthenticate(&self) -> Result<OwnedObjectPath>;
 
     /// `a(sss)` of `(service, caller_identity, decision)`.
@@ -139,6 +149,9 @@ pub trait Credentials {
 
     /// Returns validated settings, login name, and the custom mail password.
     async fn get_mail_password(&self) -> Result<(MailConnectionSettings, String, String)>;
+
+    /// Returns the HTTPS server URL, username, and password for a CalDAV account.
+    async fn get_caldav_access(&self) -> Result<(String, String, String)>;
 
     async fn invalidate_token(&self) -> Result<()>;
 }
