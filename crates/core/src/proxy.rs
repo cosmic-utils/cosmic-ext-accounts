@@ -237,6 +237,57 @@ pub trait Contacts {
     fn auth_method(&self) -> Result<String>;
 }
 
+/// Authentication schemes advertised by a CalDAV endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CalendarAuthMethod {
+    Basic,
+    OAuth2,
+}
+
+impl CalendarAuthMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Basic => "basic",
+            Self::OAuth2 => "oauth2",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "basic" => Some(Self::Basic),
+            "oauth2" => Some(Self::OAuth2),
+            _ => None,
+        }
+    }
+}
+
+/// Authentication schemes advertised by a contacts endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContactsAuthMethod {
+    Basic,
+    SimpleBind,
+    OAuth2,
+}
+
+impl ContactsAuthMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Basic => "basic",
+            Self::SimpleBind => "simple-bind",
+            Self::OAuth2 => "oauth2",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "basic" => Some(Self::Basic),
+            "simple-bind" => Some(Self::SimpleBind),
+            "oauth2" => Some(Self::OAuth2),
+            _ => None,
+        }
+    }
+}
+
 /// Authentication schemes advertised by a mail endpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MailAuthMethod {
@@ -262,7 +313,9 @@ impl MailAuthMethod {
 }
 
 /// Mail transport settings in the order used by the D-Bus wire format.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, zbus::zvariant::Type)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize, zbus::zvariant::Type,
+)]
 pub struct MailConnectionSettings {
     pub imap_host: String,
     pub imap_port: u16,
@@ -349,5 +402,28 @@ mod tests {
             ..settings
         };
         assert!(!unsupported.is_supported());
+    }
+
+    #[test]
+    fn dav_auth_methods_are_parsed() {
+        assert_eq!(
+            CalendarAuthMethod::parse("basic"),
+            Some(CalendarAuthMethod::Basic)
+        );
+        assert_eq!(
+            CalendarAuthMethod::parse("oauth2"),
+            Some(CalendarAuthMethod::OAuth2)
+        );
+        assert_eq!(CalendarAuthMethod::parse("password"), None);
+
+        assert_eq!(
+            ContactsAuthMethod::parse("simple-bind"),
+            Some(ContactsAuthMethod::SimpleBind)
+        );
+        assert_eq!(
+            ContactsAuthMethod::parse("oauth2"),
+            Some(ContactsAuthMethod::OAuth2)
+        );
+        assert_eq!(ContactsAuthMethod::parse("xoauth2"), None);
     }
 }

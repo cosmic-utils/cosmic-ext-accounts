@@ -4,12 +4,15 @@ pub mod error;
 pub mod models;
 pub mod proxy;
 pub mod registry;
-pub mod ui;
 mod service;
+pub mod ui;
 
-pub use clients::{AccountsClient, MailClient, MailCredentials};
+pub use clients::{
+    AccountsClient, CalendarClient, CalendarCredentials, ContactsClient, ContactsCredentials,
+    MailClient, MailCredentials, TasksClient, TasksCredentials,
+};
 pub use error::AccountsError;
-pub use proxy::{MailAuthMethod, MailConnectionSettings};
+pub use proxy::{CalendarAuthMethod, ContactsAuthMethod, MailAuthMethod, MailConnectionSettings};
 pub use registry::{OAuthManifest, ProviderManifest, ProviderManifestInfo, ProviderRegistry};
 pub use service::*;
 

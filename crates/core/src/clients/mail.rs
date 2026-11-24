@@ -6,10 +6,13 @@ use zbus::{Connection, fdo::Result as FdoResult};
 use crate::{
     error::{AccountsError, Result},
     models::Account,
-    proxy::{CredentialsProxy, MailAuthMethod, MailConnectionSettings, MailProxy},
+    proxy::{MailAuthMethod, MailConnectionSettings, MailProxy},
 };
 
-use super::account::account_path;
+use super::{
+    account::account_path,
+    credentials::{proxy, validate_password, validate_value},
+};
 
 /// Credentials for an IMAP/SMTP account, after broker authorization.
 ///
@@ -58,16 +61,17 @@ pub struct MailClient {
 impl MailClient {
     pub async fn new(account: &Account) -> FdoResult<Self> {
         let connection = Connection::session().await?;
-        let proxy = MailProxy::new(
-            &connection,
-            format!("/dev/edfloreshz/Accounts/Accounts/{}", account.dbus_id()),
-        )
-        .await?;
+        let proxy = MailProxy::new(&connection, account_path(&account.id)).await?;
         Ok(Self {
             connection,
             proxy,
             account: account.clone(),
         })
+    }
+
+    /// Connects using the shared error type instead of raw D-Bus errors.
+    pub async fn connect(account: &Account) -> Result<Self> {
+        Self::new(account).await.map_err(AccountsError::from)
     }
 
     pub async fn connection_settings(&self) -> FdoResult<MailConnectionSettings> {
@@ -101,18 +105,6 @@ impl MailClient {
     }
 }
 
-pub(super) async fn credentials_proxy(
-    connection: &Connection,
-    id: &Uuid,
-) -> Result<CredentialsProxy<'static>> {
-    CredentialsProxy::builder(connection)
-        .path(account_path(id))
-        .map_err(AccountsError::from)?
-        .build()
-        .await
-        .map_err(AccountsError::from)
-}
-
 /// Shared implementation used by both `AccountsClient` and `MailClient`.
 pub(super) async fn mail_credentials(
     connection: &Connection,
@@ -134,22 +126,19 @@ pub(super) async fn mail_credentials(
         return Err(AccountsError::Disabled);
     }
 
-    let credentials = credentials_proxy(connection, id).await?;
+    let credentials = proxy(connection, id).await?;
     match advertised.auth_method() {
         Some(MailAuthMethod::Password) => {
             let (settings, username, password) = credentials
                 .get_mail_password()
                 .await
                 .map_err(AccountsError::from)?;
-            if !settings.is_supported()
-                || settings.auth_method() != Some(MailAuthMethod::Password)
-                || username.is_empty()
-                || username.chars().any(char::is_control)
-                || password.is_empty()
-                || password.chars().any(|c| matches!(c, '\r' | '\n' | '\0'))
+            if !settings.is_supported() || settings.auth_method() != Some(MailAuthMethod::Password)
             {
                 return Err(AccountsError::Disabled);
             }
+            validate_value(&username, AccountsError::Disabled)?;
+            validate_password(&password, AccountsError::Disabled)?;
             Ok(MailCredentials::Password {
                 settings,
                 username,
@@ -167,9 +156,7 @@ pub(super) async fn mail_credentials(
                 .get_mail_access()
                 .await
                 .map_err(AccountsError::from)?;
-            if token.is_empty() || token.chars().any(char::is_control) {
-                return Err(AccountsError::NeedsReauth);
-            }
+            validate_value(&token, AccountsError::NeedsReauth)?;
             if !settings.is_supported() || settings.auth_method() != Some(MailAuthMethod::OAuth2) {
                 return Err(AccountsError::Disabled);
             }

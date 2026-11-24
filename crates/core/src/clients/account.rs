@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use crate::{
     error::{AccountsError, Result as AccountsResult},
-    models::{Account, DbusProviderInfo, Provider, Service},
+    models::{Account, ContactsConnectionSettings, DbusProviderInfo, Provider, Service},
     proxy::{
         AccountAddedStream, AccountProxy, AccountRemovedStream, AccountToggledStream,
         CredentialsProxy, MailConnectionSettings, MailProxy, ManagerProxy, ProviderProxy,
@@ -13,7 +13,13 @@ use crate::{
 use uuid::Uuid;
 use zbus::{Connection, fdo::Result, zvariant::OwnedObjectPath};
 
-use super::mail::{self, MailCredentials};
+use super::{
+    calendar::{self, CalendarCredentials},
+    contacts::{self, ContactsCredentials},
+    credentials,
+    mail::{self, MailCredentials},
+    tasks::{self, TasksCredentials},
+};
 
 pub(super) fn account_path(id: &Uuid) -> OwnedObjectPath {
     OwnedObjectPath::try_from(format!(
@@ -148,6 +154,29 @@ impl AccountsClient {
             .collect())
     }
 
+    /// Lists accounts for service discovery.
+    ///
+    /// Unlike `list_accounts`, a single broken account object is skipped
+    /// instead of failing discovery for every other account.
+    async fn list_discoverable_accounts(&self) -> AccountsResult<Vec<Account>> {
+        let paths = self
+            .manager
+            .list_accounts()
+            .await
+            .map_err(AccountsError::from)?;
+        let mut accounts = Vec::with_capacity(paths.len());
+        for path in paths {
+            let Ok(proxy) = self.account_proxy(path).await else {
+                continue;
+            };
+            let Ok(account) = Self::account_from_proxy(&proxy).await else {
+                continue;
+            };
+            accounts.push(account);
+        }
+        Ok(accounts)
+    }
+
     /// Version of the mail endpoint advertised by the daemon.
     pub async fn mail_endpoint_version(&self) -> AccountsResult<u32> {
         self.manager
@@ -161,27 +190,34 @@ impl AccountsClient {
     /// This performs the discovery/filtering every mail consumer would
     /// otherwise reimplement: enabled accounts with the Email service, a
     /// usable email identity and supported IMAP/SMTP settings.
-    pub async fn list_mail_accounts(&self) -> AccountsResult<Vec<(Account, MailConnectionSettings)>> {
+    pub async fn list_mail_accounts(
+        &self,
+    ) -> AccountsResult<Vec<(Account, MailConnectionSettings)>> {
         if self.mail_endpoint_version().await? == 0 {
             return Err(AccountsError::UpgradeRequired);
         }
 
         let mut result = Vec::new();
-        for account in self.list_enabled_accounts(Service::Email).await? {
+        for account in self.list_discoverable_accounts().await? {
+            if !account.is_enabled_for(&Service::Email) {
+                continue;
+            }
             let email = account.email_or_identity();
             if email.is_empty() || email.chars().any(char::is_control) {
                 continue;
             }
-            let endpoint = MailProxy::builder(&self.connection)
+            let Ok(endpoint) = MailProxy::builder(&self.connection)
                 .path(account_path(&account.id))
-                .map_err(AccountsError::from)?
-                .build()
-                .await
-                .map_err(AccountsError::from)?;
-            let settings = endpoint
-                .get_connection_settings()
-                .await
-                .map_err(AccountsError::from)?;
+                .map_err(AccountsError::from)
+            else {
+                continue;
+            };
+            let Ok(endpoint) = endpoint.build().await else {
+                continue;
+            };
+            let Ok(settings) = endpoint.get_connection_settings().await else {
+                continue;
+            };
             if settings.is_supported() {
                 result.push((account, settings));
             }
@@ -195,7 +231,7 @@ impl AccountsClient {
         id: &Uuid,
         refresh: bool,
     ) -> AccountsResult<(MailConnectionSettings, String, i64)> {
-        let credentials = mail::credentials_proxy(&self.connection, id).await?;
+        let credentials = credentials::proxy(&self.connection, id).await?;
         if refresh {
             credentials
                 .invalidate_token()
@@ -213,7 +249,7 @@ impl AccountsClient {
         &self,
         id: &Uuid,
     ) -> AccountsResult<(MailConnectionSettings, String, String)> {
-        mail::credentials_proxy(&self.connection, id)
+        credentials::proxy(&self.connection, id)
             .await?
             .get_mail_password()
             .await
@@ -221,12 +257,10 @@ impl AccountsClient {
     }
 
     /// Marks an OAuth token stale so the next request refreshes it.
+    ///
+    /// Kept as an alias for callers that think in terms of Mail only.
     pub async fn invalidate_mail_token(&self, id: &Uuid) -> AccountsResult<()> {
-        mail::credentials_proxy(&self.connection, id)
-            .await?
-            .invalidate_token()
-            .await
-            .map_err(AccountsError::from)
+        self.invalidate_token(id).await
     }
 
     /// Resolves settings and credentials in one call, including consent.
@@ -236,6 +270,110 @@ impl AccountsClient {
         refresh: bool,
     ) -> AccountsResult<MailCredentials> {
         mail::mail_credentials(&self.connection, id, refresh).await
+    }
+
+    /// Marks an OAuth token stale so the next request refreshes it.
+    pub async fn invalidate_token(&self, id: &Uuid) -> AccountsResult<()> {
+        credentials::proxy(&self.connection, id)
+            .await?
+            .invalidate_token()
+            .await
+            .map_err(AccountsError::from)
+    }
+
+    /// Lists accounts usable for calendar, with validated CalDAV endpoints.
+    pub async fn list_calendar_accounts(&self) -> AccountsResult<Vec<(Account, String)>> {
+        let mut result = Vec::new();
+        for account in self.list_discoverable_accounts().await? {
+            if !account.is_enabled_for(&Service::Calendar) {
+                continue;
+            }
+            let Ok(endpoint) = calendar::endpoint_proxy(&self.connection, &account.id).await else {
+                continue;
+            };
+            let Ok(uri) = endpoint.uri().await else {
+                continue;
+            };
+            if credentials::validate_url(&uri, "https://").is_ok() {
+                result.push((account, uri));
+            }
+        }
+        Ok(result)
+    }
+
+    /// Resolves a CalDAV endpoint and its credentials in one call.
+    pub async fn calendar_credentials(
+        &self,
+        id: &Uuid,
+        refresh: bool,
+    ) -> AccountsResult<CalendarCredentials> {
+        calendar::credentials(&self.connection, id, refresh).await
+    }
+
+    /// Lists accounts usable for contacts, with validated directory settings.
+    pub async fn list_contacts_accounts(
+        &self,
+    ) -> AccountsResult<Vec<(Account, ContactsConnectionSettings)>> {
+        let mut result = Vec::new();
+        for account in self.list_discoverable_accounts().await? {
+            if !account.is_enabled_for(&Service::Contacts) {
+                continue;
+            }
+            let Ok(settings) = contacts::connection_settings(&self.connection, &account.id).await
+            else {
+                continue;
+            };
+            result.push((account, settings));
+        }
+        Ok(result)
+    }
+
+    /// Resolves directory settings and credentials in one call.
+    pub async fn contacts_credentials(
+        &self,
+        id: &Uuid,
+        refresh: bool,
+    ) -> AccountsResult<ContactsCredentials> {
+        contacts::credentials(&self.connection, id, refresh).await
+    }
+
+    /// Lists accounts usable for tasks, with validated CalDAV endpoints.
+    pub async fn list_tasks_accounts(&self) -> AccountsResult<Vec<(Account, String)>> {
+        let mut result = Vec::new();
+        for account in self.list_discoverable_accounts().await? {
+            if !account.is_enabled_for(&Service::Tasks) {
+                continue;
+            }
+            let Ok(endpoint) = tasks::endpoint_proxy(&self.connection, &account.id).await else {
+                continue;
+            };
+            let Ok(uri) = endpoint.uri().await else {
+                continue;
+            };
+            if credentials::validate_url(&uri, "https://").is_ok() {
+                result.push((account, uri));
+            }
+        }
+        Ok(result)
+    }
+
+    /// Resolves a tasks endpoint and its access token in one call.
+    pub async fn tasks_credentials(
+        &self,
+        id: &Uuid,
+        refresh: bool,
+    ) -> AccountsResult<TasksCredentials> {
+        tasks::credentials(&self.connection, id, refresh).await
+    }
+
+    /// Requests an OAuth token for any service, optionally forcing a refresh.
+    pub async fn access_token(
+        &self,
+        id: &Uuid,
+        service: &Service,
+        refresh: bool,
+    ) -> AccountsResult<(String, i64)> {
+        credentials::access_token(&self.connection, id, service, refresh).await
     }
 
     pub async fn create_mail_account(
@@ -416,5 +554,19 @@ impl AccountsClient {
 
     pub async fn receive_account_toggled(&self) -> zbus::Result<AccountToggledStream> {
         self.manager.receive_account_toggled().await
+    }
+
+    /// Watches per-service enable/disable changes for an account.
+    ///
+    /// The signal is emitted from the account object with the new list of
+    /// enabled services; callers can re-query the accounts they care about.
+    pub async fn receive_services_changed(
+        &self,
+        id: &Uuid,
+    ) -> zbus::Result<crate::proxy::ServicesChangedStream> {
+        self.account_proxy(account_path(id))
+            .await?
+            .receive_services_changed()
+            .await
     }
 }

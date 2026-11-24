@@ -49,12 +49,55 @@ impl CustomMailSettings {
     }
 }
 
+/// Field-level validation failure for a custom contacts account.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContactsConnectionSettingsError {
+    UnsupportedProtocol,
+    InvalidUri,
+    InsecureUri,
+    BaseDnRequired,
+    UnexpectedBaseDn,
+}
+
 /// Directory settings. The base DN is empty for CardDAV.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Type)]
 pub struct ContactsConnectionSettings {
     pub protocol: String,
     pub uri: String,
     pub base_dn: String,
+}
+
+impl ContactsConnectionSettings {
+    /// Validates the protocol, secure URI and base DN expected by each backend.
+    pub fn validate(&self) -> Result<(), ContactsConnectionSettingsError> {
+        let expected_scheme = match self.protocol.as_str() {
+            "carddav" => "https://",
+            "ldap" => "ldaps://",
+            _ => return Err(ContactsConnectionSettingsError::UnsupportedProtocol),
+        };
+
+        if self.uri.is_empty()
+            || self
+                .uri
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace())
+        {
+            return Err(ContactsConnectionSettingsError::InvalidUri);
+        }
+        if !self.uri.starts_with(expected_scheme) {
+            return Err(ContactsConnectionSettingsError::InsecureUri);
+        }
+
+        match self.protocol.as_str() {
+            "carddav" if !self.base_dn.is_empty() => {
+                Err(ContactsConnectionSettingsError::UnexpectedBaseDn)
+            }
+            "ldap" if self.base_dn.trim().is_empty() => {
+                Err(ContactsConnectionSettingsError::BaseDnRequired)
+            }
+            _ => Ok(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -201,5 +244,40 @@ mod tests {
             ..valid
         };
         assert_eq!(invalid.validate(), Err(CustomMailSettingsError::ImapPort));
+    }
+
+    #[test]
+    fn contacts_settings_validate_protocol_uri_and_base_dn() {
+        let carddav = ContactsConnectionSettings {
+            protocol: "carddav".into(),
+            uri: "https://dav.example.com".into(),
+            base_dn: String::new(),
+        };
+        assert_eq!(carddav.validate(), Ok(()));
+
+        let ldap = ContactsConnectionSettings {
+            protocol: "ldap".into(),
+            uri: "ldaps://ldap.example.com".into(),
+            base_dn: "dc=example,dc=com".into(),
+        };
+        assert_eq!(ldap.validate(), Ok(()));
+
+        let insecure = ContactsConnectionSettings {
+            uri: "http://dav.example.com".into(),
+            ..carddav
+        };
+        assert_eq!(
+            insecure.validate(),
+            Err(ContactsConnectionSettingsError::InsecureUri)
+        );
+
+        let missing_base_dn = ContactsConnectionSettings {
+            base_dn: String::new(),
+            ..ldap
+        };
+        assert_eq!(
+            missing_base_dn.validate(),
+            Err(ContactsConnectionSettingsError::BaseDnRequired)
+        );
     }
 }
