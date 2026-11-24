@@ -107,9 +107,24 @@ impl CredentialsInterface {
                 "This account uses a mail password".into(),
             ));
         }
-        let (token, expiry) = self
-            .issue_access_token(header, connection, "Email", true)
-            .await?;
+        let endpoint = crate::services::mail_endpoint(&account)
+            .map_err(|err| TokenError::Disabled(err.to_string()))?;
+        let (token, expiry) = if endpoint.oauth_scopes.is_empty() {
+            self.issue_access_token(header, connection, "Email", true)
+                .await?
+        } else {
+            let account = self.authorize(header, connection, "Email").await?;
+            self.auth_manager
+                .lock()
+                .await
+                .scoped_access_token(&account, &endpoint.oauth_scopes)
+                .await
+                .map_err(|_| {
+                    TokenError::NeedsReauth(
+                        "Reconnect the account to grant access to the mail server".into(),
+                    )
+                })?
+        };
         Ok((settings, token, expiry))
     }
 
@@ -206,6 +221,10 @@ impl CredentialsInterface {
                 polkit::ACTION_GET_TOKEN
             )));
         }
+        self.auth_manager
+            .lock()
+            .await
+            .invalidate_scoped_tokens(&self.id);
         self.stale.lock().await.insert(self.id);
         Ok(())
     }

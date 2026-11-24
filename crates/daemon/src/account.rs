@@ -181,7 +181,7 @@ impl AccountInterface {
         }
 
         {
-            let auth_manager = self.auth_manager.lock().await;
+            let mut auth_manager = self.auth_manager.lock().await;
             auth_manager
                 .delete_credentials(&id)
                 .await

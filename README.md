@@ -85,10 +85,16 @@ over TLS for LDAP, keeping credentials on the configured server.
 
 Mail clients can discover supported transports through `Endpoint.Mail.GetConnectionSettings`.
 `Credentials.GetMailAccess` applies the account's Email grant and returns the current, validated
-connection settings with an OAuth token for Gmail. Custom accounts use the separate
-`Credentials.GetMailPassword` method, which returns settings, username, and password after
-Email consent. The Google provider manifest declares the endpoints and TLS modes. The Microsoft provider's Graph credentials
-remain available through the generic credential API.
+connection settings with an OAuth token for Gmail or Exchange Online. Microsoft IMAP and SMTP
+use an Exchange Online token, while the generic credential API continues to return the provider's
+primary token for Microsoft Graph. Custom accounts use `Credentials.GetMailPassword` to get
+settings, username, and password after Email consent.
+
+For an existing Microsoft setup, merge the updated provider template into the installed
+`microsoft.toml` while keeping your OAuth client configuration. Register the delegated Graph
+`Mail.ReadWrite` and `Mail.Send` permissions and the delegated Exchange Online
+`IMAP.AccessAsUser.All` and `SMTP.Send` permissions for that client. Reconnect the account
+to grant the new scopes.
 
 ## Contributing
 

@@ -239,7 +239,7 @@ impl ManagerInterface {
             .ok_or_else(|| Error::Failed("Accounts is starting".into()))?;
         validate_password(password)?;
 
-        let auth = self.auth_manager.lock().await;
+        let mut auth = self.auth_manager.lock().await;
         {
             let mut config = self.config.lock().await;
             if config.accounts.iter().any(|saved| {

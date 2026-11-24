@@ -72,6 +72,8 @@ pub struct MailEndpointManifest {
     #[serde(default = "default_smtp_port")]
     pub smtp_port: u16,
     pub smtp_tls: Option<MailTls>,
+    #[serde(default)]
+    pub oauth_scopes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]

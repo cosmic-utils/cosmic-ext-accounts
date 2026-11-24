@@ -61,6 +61,7 @@ pub struct CompletedAuth {
 
 pub struct AuthManager {
     pending_auth: HashMap<String, PendingAuth>,
+    scoped_tokens: HashMap<(Uuid, Vec<String>), (String, i64)>,
     storage: CredentialStorage,
 }
 
@@ -68,6 +69,7 @@ impl AuthManager {
     pub async fn new() -> Result<Self> {
         Ok(Self {
             pending_auth: HashMap::new(),
+            scoped_tokens: HashMap::new(),
             storage: CredentialStorage::new().await?,
         })
     }
@@ -125,7 +127,10 @@ impl AuthManager {
             .authorize_url(CsrfToken::new_random)
             .set_pkce_challenge(pkce_challenge);
 
-        for scope in &manifest.oauth.scopes {
+        let mail_scopes = crate::services::trusted_endpoint(manifest)
+            .into_iter()
+            .flat_map(|endpoint| &endpoint.oauth_scopes);
+        for scope in manifest.oauth.scopes.iter().chain(mail_scopes) {
             auth_request = auth_request.add_scope(Scope::new(scope.clone()));
         }
 
@@ -195,11 +200,17 @@ impl AuthManager {
 
         let client = Self::oauth_client(manifest)?.set_redirect_uri(pending.redirect);
 
-        let token_result = client
+        let mut exchange = client
             .exchange_code(AuthorizationCode::new(authorization_code))
-            .set_pkce_verifier(pending.verifier)
-            .request_async(async_http_client)
-            .await?;
+            .set_pkce_verifier(pending.verifier);
+        if crate::services::trusted_endpoint(manifest)
+            .is_some_and(|endpoint| !endpoint.oauth_scopes.is_empty())
+        {
+            // The primary access token is used for the provider's userinfo.
+            // Exchange consent is acquired above but its token is fetched separately.
+            exchange = exchange.add_extra_param("scope", manifest.oauth.scopes.join(" "));
+        }
+        let token_result = exchange.request_async(async_http_client).await?;
 
         let access_token = token_result.access_token().secret();
         let refresh_token = token_result.refresh_token().map(|t| t.secret().clone());
@@ -228,6 +239,7 @@ impl AuthManager {
                 });
             }
             account.last_used = Some(Utc::now());
+            self.invalidate_scoped_tokens(&account.id);
 
             self.storage
                 .set_account_credentials(&account.id, &credentials)
@@ -438,6 +450,55 @@ impl AuthManager {
         })
     }
 
+    pub(crate) fn invalidate_scoped_tokens(&mut self, id: &Uuid) {
+        self.scoped_tokens.retain(|(account, _), _| account != id);
+    }
+
+    pub(crate) async fn scoped_access_token(
+        &mut self,
+        account: &accounts_core::models::Account,
+        scopes: &[String],
+    ) -> Result<(String, i64)> {
+        let mut scopes = scopes.to_vec();
+        scopes.sort_unstable();
+        let key = (account.id, scopes);
+        if let Some((token, expiry)) = self.scoped_tokens.get(&key)
+            && *expiry > Utc::now().timestamp() + 30
+        {
+            return Ok((token.clone(), *expiry));
+        }
+
+        let manifest = Self::registry()?
+            .get(&account.provider)
+            .ok_or_else(|| Error::InvalidProvider(account.provider.clone()))?;
+        let mut credentials = self.storage.get_account_credentials(&account.id).await?;
+        let refresh = credentials
+            .refresh_token
+            .as_ref()
+            .ok_or_else(|| Error::TokenExpired {
+                account_id: account.id.to_string(),
+            })?;
+        let client = Self::oauth_client(manifest)?;
+        let refresh = oauth2::RefreshToken::new(refresh.clone());
+        let mut request = client.exchange_refresh_token(&refresh);
+        for scope in &key.1 {
+            request = request.add_scope(Scope::new(scope.clone()));
+        }
+        let response = request.request_async(async_http_client).await?;
+        let expiry = response.expires_in().map_or(0, |duration| {
+            (Utc::now() + Duration::seconds(duration.as_secs() as i64)).timestamp()
+        });
+        let token = response.access_token().secret().clone();
+        if let Some(refresh) = response.refresh_token() {
+            credentials.refresh_token = Some(refresh.secret().clone());
+            self.storage
+                .set_account_credentials(&account.id, &credentials)
+                .await?;
+        }
+        self.scoped_tokens.insert(key, (token.clone(), expiry));
+        Ok((token, expiry))
+    }
+
     pub async fn refresh_token(&self, account: &accounts_core::models::Account) -> Result<()> {
         let registry = Self::registry()?;
         let manifest = registry
@@ -456,10 +517,16 @@ impl AuthManager {
 
         let client = Self::oauth_client(manifest)?;
 
-        let token_result = client
-            .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token.clone()))
-            .request_async(async_http_client)
-            .await?;
+        let refresh = oauth2::RefreshToken::new(refresh_token.clone());
+        let mut request = client.exchange_refresh_token(&refresh);
+        if crate::services::trusted_endpoint(manifest)
+            .is_some_and(|endpoint| !endpoint.oauth_scopes.is_empty())
+        {
+            for scope in &manifest.oauth.scopes {
+                request = request.add_scope(Scope::new(scope.clone()));
+            }
+        }
+        let token_result = request.request_async(async_http_client).await?;
 
         credentials.access_token = token_result.access_token().secret().clone();
         if let Some(new_refresh_token) = token_result.refresh_token() {
@@ -526,7 +593,8 @@ impl AuthManager {
         )
     }
 
-    pub async fn delete_credentials(&self, id: &Uuid) -> Result<()> {
+    pub async fn delete_credentials(&mut self, id: &Uuid) -> Result<()> {
+        self.invalidate_scoped_tokens(id);
         self.storage.delete_account_credentials(id).await?;
         Ok(())
     }

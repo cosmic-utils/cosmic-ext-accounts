@@ -25,25 +25,49 @@ impl MailService {
     }
 }
 
-fn trusted_endpoint(manifest: &ProviderManifest) -> Option<&MailEndpointManifest> {
+const EXCHANGE_SCOPES: [&str; 2] = [
+    "https://outlook.office.com/IMAP.AccessAsUser.All",
+    "https://outlook.office.com/SMTP.Send",
+];
+
+pub(crate) fn trusted_endpoint(manifest: &ProviderManifest) -> Option<&MailEndpointManifest> {
     let endpoint = manifest.endpoint.mail.as_ref()?;
-    // Provider overrides may supply OAuth configuration. They cannot redirect
-    // Gmail bearer tokens to another server or weaken transport security.
-    let trusted = manifest.provider.id == "google"
-        && manifest.handler.is_none()
-        && manifest
-            .oauth
-            .scopes
-            .iter()
-            .any(|scope| scope == "https://mail.google.com/")
-        && endpoint.imap_host == "imap.gmail.com"
-        && endpoint.imap_port == 993
-        && endpoint.imap_tls == MailTls::Tls
-        && endpoint.smtp_host == "smtp.gmail.com"
-        && matches!(
-            (endpoint.smtp_port, endpoint.smtp_tls()),
-            (465, MailTls::Tls) | (587, MailTls::Starttls)
-        );
+    if manifest.handler.is_some() || endpoint.imap_port != 993 || endpoint.imap_tls != MailTls::Tls
+    {
+        return None;
+    }
+    // Provider overrides cannot redirect bearer tokens or downgrade TLS.
+    let trusted = match manifest.provider.id.as_str() {
+        "google" => {
+            endpoint.oauth_scopes.is_empty()
+                && manifest
+                    .oauth
+                    .scopes
+                    .iter()
+                    .any(|scope| scope == "https://mail.google.com/")
+                && endpoint.imap_host == "imap.gmail.com"
+                && endpoint.smtp_host == "smtp.gmail.com"
+                && matches!(
+                    (endpoint.smtp_port, endpoint.smtp_tls()),
+                    (465, MailTls::Tls) | (587, MailTls::Starttls)
+                )
+        }
+        "microsoft" => {
+            endpoint.oauth_scopes.len() == EXCHANGE_SCOPES.len()
+                && EXCHANGE_SCOPES
+                    .iter()
+                    .all(|scope| endpoint.oauth_scopes.iter().any(|value| value == scope))
+                && endpoint.imap_host == "outlook.office365.com"
+                && matches!(
+                    endpoint.smtp_host.as_str(),
+                    "smtp.office365.com" | "smtp-mail.outlook.com"
+                )
+                && (endpoint.smtp_port, endpoint.smtp_tls()) == (587, MailTls::Starttls)
+                && manifest.oauth.token_url
+                    == "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+        }
+        _ => false,
+    };
     trusted.then_some(endpoint)
 }
 
@@ -259,6 +283,24 @@ mod tests {
         mail.smtp_port = 587;
         mail.smtp_tls = Some(MailTls::Starttls);
         mail.smtp_host = "mail.example.org".into();
+        assert!(trusted_endpoint(&manifest).is_none());
+    }
+
+    #[test]
+    fn exchange_endpoints_require_exchange_scopes_and_trusted_hosts() {
+        let mut manifest: ProviderManifest =
+            toml::from_str(include_str!("../../../ui/data/providers/microsoft.toml")).unwrap();
+        assert!(trusted_endpoint(&manifest).is_some());
+        manifest.endpoint.mail.as_mut().unwrap().smtp_host = "smtp.example.test".into();
+        assert!(trusted_endpoint(&manifest).is_none());
+        manifest.endpoint.mail.as_mut().unwrap().smtp_host = "smtp.office365.com".into();
+        manifest
+            .endpoint
+            .mail
+            .as_mut()
+            .unwrap()
+            .oauth_scopes
+            .clear();
         assert!(trusted_endpoint(&manifest).is_none());
     }
 
