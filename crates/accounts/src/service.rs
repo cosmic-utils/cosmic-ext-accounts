@@ -1,12 +1,14 @@
 //! Service-specific credential types returned to consuming applications.
 
-use crate::{
-    error::{Error, Result},
-    manager::Accounts,
-    model::{Provider, Resource, SecretString, Service},
-    provider,
-};
+#[cfg(any(feature = "calendar", feature = "mail", feature = "contacts"))]
+use crate::manager::Accounts;
+#[cfg(any(feature = "calendar", feature = "mail", feature = "contacts"))]
+use crate::{error::{Error, Result}, model::{Provider, Resource, SecretString, Service}};
 
+#[cfg(feature = "calendar")]
+use crate::provider;
+
+#[cfg(any(feature = "calendar", feature = "mail", feature = "contacts"))]
 fn password_from(secret: Option<Vec<u8>>) -> Result<SecretString> {
     let bytes = secret.ok_or_else(|| Error::AuthenticationFailed("password is missing".into()))?;
     let password = String::from_utf8(bytes)

@@ -8,18 +8,22 @@ use oauth2::{
     basic::BasicClient, reqwest::async_http_client,
 };
 use tokio::sync::{Mutex, broadcast};
+#[cfg(any(feature = "calendar", feature = "mail", feature = "contacts"))]
 use uuid::Uuid;
 
+#[cfg(all(feature = "calendar", not(feature = "contacts")))]
+use crate::model::CalDavSettings;
+#[cfg(any(feature = "calendar", feature = "mail", feature = "contacts"))]
+use crate::model::Endpoint;
 #[cfg(feature = "contacts")]
-use crate::model::LdapSettings;
+use crate::model::{CalDavSettings, LdapSettings};
 #[cfg(feature = "mail")]
 use crate::model::ImapSmtpSettings;
 use crate::{
     config::Config,
     error::{Error, Result},
     model::{
-        Account, AccountId, CalDavSettings, Credential, Endpoint, Provider, Resource, SecretString,
-        Service, StoredData,
+        Account, AccountId, Credential, Provider, Resource, SecretString, Service, StoredData,
     },
     oauth::{AuthManager, AuthRequest},
     provider::{self, spec},
@@ -454,6 +458,7 @@ impl Accounts {
             .clone()
     }
 
+    #[cfg(any(feature = "calendar", feature = "mail", feature = "contacts"))]
     async fn insert_password_account(
         &self,
         provider: Provider,
@@ -591,6 +596,7 @@ impl Accounts {
     }
 }
 
+#[cfg(any(feature = "calendar", feature = "contacts"))]
 fn validate_secure_url(value: &str, schemes: &[&str]) -> Result<()> {
     let url = url::Url::parse(value)
         .map_err(|_| Error::InvalidEndpoint("endpoint is not a valid URL".into()))?;

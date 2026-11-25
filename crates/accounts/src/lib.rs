@@ -27,4 +27,7 @@ pub use oauth::{AuthRequest, CompletedAuth};
 
 #[cfg(feature = "calendar")]
 pub use service::CalendarCredentials;
+#[cfg(feature = "mail")]
+pub use service::{MailConnectionSettings, MailCredentials, MailTransport};
+#[cfg(not(feature = "mail"))]
 pub use service::MailConnectionSettings;
