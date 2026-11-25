@@ -5,9 +5,7 @@
   <p>Embedded, app-owned online accounts</p>
 </div>
 
-`accounts` is a headless Rust library that Calendar, Mail, and Tasks embed to
-manage their own online accounts. There is no separate Accounts app, daemon,
-consent prompt, polkit policy, D-Bus broker, or shared account database. Each
+Accounts is a headless Rust library that to manage online accounts. Each
 application picks the service features it needs, stores its own accounts in its
 own data directory, and owns its own credentials.
 
@@ -33,7 +31,7 @@ own data directory, and owns its own credentials.
 
 ```toml
 [dependencies]
-accounts = { path = "../cosmic-ext-accounts/crates/accounts", features = ["calendar", "libcosmic"] }
+accounts = { git = "https://github.com/cosmic-utils/accounts", features = ["calendar", "libcosmic"] }
 ```
 
 Features are additive and optional:
