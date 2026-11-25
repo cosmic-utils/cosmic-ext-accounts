@@ -5,9 +5,9 @@
   <p>Embedded, app-owned online accounts</p>
 </div>
 
-Accounts is a headless Rust library that to manage online accounts. Each
-application picks the service features it needs, stores its own accounts in its
-own data directory, and owns its own credentials.
+Accounts is a single-crate, headless Rust library for managing online accounts.
+Each application picks the service features it needs, stores its own accounts
+in its own data directory, and owns its own credentials.
 
 ## What it provides
 

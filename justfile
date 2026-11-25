@@ -4,24 +4,24 @@ default:
 
 # Build the embedded accounts library
 build:
-    cargo build --release -p accounts
+    cargo build --release
 
 # Build only the library (kept for compatibility with older scripts)
 build-lib:
-    cargo build --release -p accounts
+    cargo build --release
 
 # Run all tests
 test:
-    cargo test --workspace --all-features
+    cargo test --all-features
 
 # Check headless and feature-gated builds
 check-features:
-    cargo check -p accounts --no-default-features
-    cargo check -p accounts --no-default-features --features calendar
-    cargo check -p accounts --no-default-features --features mail
-    cargo check -p accounts --no-default-features --features contacts
-    cargo check -p accounts --no-default-features --features tasks
-    cargo check -p accounts --no-default-features --features calendar,mail,contacts,tasks,libcosmic
+    cargo check --no-default-features
+    cargo check --no-default-features --features calendar
+    cargo check --no-default-features --features mail
+    cargo check --no-default-features --features contacts
+    cargo check --no-default-features --features tasks
+    cargo check --no-default-features --features calendar,mail,contacts,tasks,libcosmic
 
 # Run clippy linting
 lint:
@@ -44,7 +44,7 @@ clean:
 
 # Generate documentation
 docs:
-    cargo doc -p accounts --all-features --no-deps --open
+    cargo doc --all-features --no-deps --open
 
 # Check dependencies for security advisories
 audit:
@@ -62,9 +62,9 @@ outdated:
 bench:
     cargo bench
 
-# Full workspace build check
-workspace-check:
-    cargo check --workspace --all-targets --all-features
+# Full crate build check
+crate-check:
+    cargo check --all-targets --all-features
 
 # Development: watch for changes and run tests
 dev-watch:
