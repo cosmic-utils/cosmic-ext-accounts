@@ -249,6 +249,10 @@ pub fn authorization_scopes(provider: Provider, service: Service) -> Vec<String>
         .iter()
         .map(|scope| (*scope).to_owned())
         .collect();
+    if provider == Provider::Microsoft {
+        // Sign-in reads the signed-in user's profile from Microsoft Graph /me.
+        scopes.push("https://graph.microsoft.com/User.Read".to_owned());
+    }
     for resource in resources_for(provider, service) {
         scopes.extend(
             service_scopes(service, resource)
