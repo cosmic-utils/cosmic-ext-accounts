@@ -6,8 +6,8 @@ mod app;
 mod i18n;
 
 fn main() -> cosmic::iced::Result {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("accounts_ui=info"));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("accounts_ui=info"));
 
     tracing_subscriber::registry()
         .with(filter)

@@ -3,10 +3,12 @@
 //! The panel is service-scoped: a host that enables several service features
 //! still sees only the providers and forms valid for the service it passes in.
 
+use std::borrow::Cow;
+
 use cosmic::{
+    Element,
     iced::Alignment,
     widget::{self, text},
-    Element,
 };
 
 use crate::{
@@ -37,9 +39,7 @@ fn service_label(service: Service) -> &'static str {
 }
 
 fn account_label(account: &crate::model::Account) -> String {
-    account
-        .email_or_identity()
-        .to_owned()
+    account.email_or_identity().to_owned()
 }
 
 /// Opens the sign-in URL in the user's browser and returns the request that
@@ -55,11 +55,57 @@ pub async fn sign_in(
     Ok(request)
 }
 
+fn default_waiting(provider: Provider) -> String {
+    format!("Waiting for {} sign-in", provider_label(provider))
+}
+
+fn default_sign_in(provider: Provider) -> String {
+    format!("Sign in with {}", provider_label(provider))
+}
+
+/// User-facing strings for [`view`]. Hosts can supply localized labels while
+/// the library keeps responsibility for the layout and service filtering.
+pub struct Labels<'a> {
+    pub title: Cow<'a, str>,
+    pub empty: Cow<'a, str>,
+    pub waiting: &'a dyn Fn(Provider) -> String,
+    pub waiting_description: Cow<'a, str>,
+    pub cancel: Cow<'a, str>,
+    pub reconnect: Cow<'a, str>,
+    pub remove: Cow<'a, str>,
+    pub add: Cow<'a, str>,
+    pub add_description: Cow<'a, str>,
+    pub no_providers: Cow<'a, str>,
+    pub sign_in: &'a dyn Fn(Provider) -> String,
+}
+
+impl<'a> Default for Labels<'a> {
+    fn default() -> Self {
+        Self {
+            title: "Accounts".into(),
+            empty: "No accounts are connected.".into(),
+            waiting: &default_waiting,
+            waiting_description: "Finish the sign-in in your browser.".into(),
+            cancel: "Cancel".into(),
+            reconnect: "Reconnect".into(),
+            remove: "Remove".into(),
+            add: "Add account".into(),
+            add_description: "Connect an account.".into(),
+            no_providers: "No providers are available in this build.".into(),
+            sign_in: &default_sign_in,
+        }
+    }
+}
+
 pub struct View<'a, M> {
     pub service: Service,
     pub accounts: &'a [crate::model::Account],
     pub pending: Option<&'a AuthRequest>,
-    pub error: Option<&'a str>,
+    pub error: Option<Cow<'a, str>>,
+    /// Providers to offer. `None` uses every provider enabled for `service`.
+    /// Hosts that keep an app-local editor can narrow this list.
+    pub providers: Option<&'a [Provider]>,
+    pub labels: Labels<'a>,
     pub on_add: &'a dyn Fn(Provider) -> M,
     pub on_cancel: &'a dyn Fn(&str) -> M,
     pub on_remove: &'a dyn Fn(AccountId) -> M,
@@ -72,7 +118,12 @@ pub fn view<'a, M>(view: View<'a, M>) -> Element<'a, M>
 where
     M: Clone + 'static,
 {
-    let mut section = widget::settings::section().title("Accounts");
+    let providers = match view.providers {
+        Some(providers) => providers.to_vec(),
+        None => provider::providers_for(view.service),
+    };
+
+    let mut section = widget::settings::section().title(view.labels.title);
 
     if let Some(error) = view.error {
         section = section.add(text::body(error));
@@ -81,23 +132,16 @@ where
     if let Some(request) = view.pending {
         let state = request.state.clone();
         section = section.add(
-            widget::settings::item::builder(format!(
-                "Waiting for {} sign-in",
-                provider_label(request.provider)
-            ))
-            .description("Finish the sign-in in your browser.")
-            .control(
-                widget::button::standard("Cancel")
-                    .on_press((view.on_cancel)(&state)),
-            ),
+            widget::settings::item::builder((view.labels.waiting)(request.provider))
+                .description(view.labels.waiting_description)
+                .control(
+                    widget::button::standard(view.labels.cancel).on_press((view.on_cancel)(&state)),
+                ),
         );
     }
 
     if view.accounts.is_empty() && view.pending.is_none() {
-        section = section.add(text::body(format!(
-            "No {} accounts are connected.",
-            service_label(view.service)
-        )));
+        section = section.add(text::body(view.labels.empty));
     }
 
     for account in view.accounts {
@@ -105,11 +149,18 @@ where
         let controls = widget::row::with_capacity(3)
             .spacing(cosmic::theme::spacing().space_xs)
             .align_y(Alignment::Center)
-            .push(widget::button::standard("Reconnect").on_press((view.on_reconnect)(id)))
-            .push(widget::button::destructive("Remove").on_press((view.on_remove)(id)))
-            .push(widget::toggler(account.enabled).on_toggle(move |enabled| {
-                (view.on_toggle)(id, enabled)
-            }));
+            .push(
+                widget::button::standard(view.labels.reconnect.clone())
+                    .on_press((view.on_reconnect)(id)),
+            )
+            .push(
+                widget::button::destructive(view.labels.remove.clone())
+                    .on_press((view.on_remove)(id)),
+            )
+            .push(
+                widget::toggler(account.enabled)
+                    .on_toggle(move |enabled| (view.on_toggle)(id, enabled)),
+            );
         section = section.add(
             widget::settings::item::builder(account_label(account))
                 .description(format!(
@@ -121,24 +172,20 @@ where
         );
     }
 
-    let providers = provider::providers_for(view.service);
     if providers.is_empty() {
-        section = section.add(text::body(format!(
-            "No providers are available for {} in this build.",
-            service_label(view.service)
-        )));
+        section = section.add(text::body(view.labels.no_providers));
     } else {
-        let mut buttons = widget::row::with_capacity(providers.len())
-            .spacing(cosmic::theme::spacing().space_xs);
+        let mut buttons =
+            widget::row::with_capacity(providers.len()).spacing(cosmic::theme::spacing().space_xs);
         for provider in providers {
             buttons = buttons.push(
-                widget::button::standard(format!("Sign in with {}", provider_label(provider)))
+                widget::button::standard((view.labels.sign_in)(provider))
                     .on_press((view.on_add)(provider)),
             );
         }
         section = section.add(
-            widget::settings::item::builder("Add account")
-                .description(format!("Connect a {} account.", service_label(view.service)))
+            widget::settings::item::builder(view.labels.add)
+                .description(view.labels.add_description)
                 .control(buttons),
         );
     }
@@ -183,9 +230,9 @@ where
     M: Clone + 'static,
 {
     widget::settings::item::builder(label)
-        .control(widget::text_input(placeholder, value).on_input(move |value| {
-            on_change(field, value)
-        }))
+        .control(
+            widget::text_input(placeholder, value).on_input(move |value| on_change(field, value)),
+        )
         .into()
 }
 
@@ -320,7 +367,9 @@ where
             widget::row::with_capacity(2)
                 .spacing(cosmic::theme::spacing().space_xs)
                 .push(widget::button::standard("Cancel").on_press((on_cancel)()))
-                .push(widget::button::suggested(format!("Connect {service}")).on_press((on_submit)())),
+                .push(
+                    widget::button::suggested(format!("Connect {service}")).on_press((on_submit)()),
+                ),
         )
         .into()
 }

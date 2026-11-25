@@ -50,7 +50,10 @@ pub enum CalendarCredentials {
 
 #[cfg(feature = "calendar")]
 impl Accounts {
-    pub async fn calendar_credentials(&self, id: crate::model::AccountId) -> Result<CalendarCredentials> {
+    pub async fn calendar_credentials(
+        &self,
+        id: crate::model::AccountId,
+    ) -> Result<CalendarCredentials> {
         let account = self
             .get(id)
             .await
@@ -60,9 +63,7 @@ impl Accounts {
         }
 
         if account.provider == Provider::CustomCalDav {
-            let credential = self
-                .credential(id, Resource::CalDav)
-                .await?;
+            let credential = self.credential(id, Resource::CalDav).await?;
             let url = match &account.endpoint {
                 crate::model::Endpoint::CalDav(settings) => settings.url.clone(),
                 _ => return Err(Error::InvalidEndpoint("CalDAV URL is missing".into())),
@@ -75,7 +76,10 @@ impl Accounts {
         }
 
         let credential = self
-            .credential(id, provider::primary_resource(account.provider, Service::Calendar))
+            .credential(
+                id,
+                provider::primary_resource(account.provider, Service::Calendar),
+            )
             .await?;
         let uri = match &account.endpoint {
             crate::model::Endpoint::CalDav(settings) => settings.url.clone(),
@@ -150,20 +154,14 @@ fn provider_mail_settings(provider: Provider) -> Option<MailConnectionSettings> 
 #[cfg(feature = "mail")]
 impl Accounts {
     /// Graph bearer token for Microsoft's Graph transport.
-    pub async fn mail_graph_token(
-        &self,
-        id: crate::model::AccountId,
-    ) -> Result<SecretString> {
+    pub async fn mail_graph_token(&self, id: crate::model::AccountId) -> Result<SecretString> {
         let credential = self.credential(id, Resource::Graph).await?;
         Ok(SecretString::new(credential.access_token.clone()))
     }
 
     /// IMAP/SMTP credentials. Microsoft uses a separate Exchange token; a
     /// Graph token is never returned here.
-    pub async fn mail_access(
-        &self,
-        id: crate::model::AccountId,
-    ) -> Result<MailCredentials> {
+    pub async fn mail_access(&self, id: crate::model::AccountId) -> Result<MailCredentials> {
         let account = self
             .get(id)
             .await
@@ -251,7 +249,11 @@ impl Accounts {
                         base_dn: settings.base_dn.clone(),
                     }
                 }
-                _ => return Err(Error::InvalidEndpoint("contacts endpoint is missing".into())),
+                _ => {
+                    return Err(Error::InvalidEndpoint(
+                        "contacts endpoint is missing".into(),
+                    ));
+                }
             };
             return Ok(ContactsCredentials::Basic {
                 settings,
@@ -277,10 +279,7 @@ pub struct TasksCredentials {
 
 #[cfg(feature = "tasks")]
 impl Accounts {
-    pub async fn tasks_credentials(
-        &self,
-        id: crate::model::AccountId,
-    ) -> Result<TasksCredentials> {
+    pub async fn tasks_credentials(&self, id: crate::model::AccountId) -> Result<TasksCredentials> {
         let account = self
             .get(id)
             .await
@@ -289,7 +288,10 @@ impl Accounts {
             return Err(Error::NeedsReauth(id.to_string()));
         }
         let credential = self
-            .credential(id, provider::primary_resource(account.provider, Service::Tasks))
+            .credential(
+                id,
+                provider::primary_resource(account.provider, Service::Tasks),
+            )
             .await?;
         Ok(TasksCredentials {
             endpoint: provider::endpoint_base(account.provider, Service::Tasks).map(str::to_owned),

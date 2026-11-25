@@ -67,8 +67,7 @@ impl Config {
         service: Service,
         client: ClientConfig,
     ) -> Self {
-        self.clients
-            .insert((provider, service, None), client);
+        self.clients.insert((provider, service, None), client);
         self
     }
 
@@ -103,8 +102,7 @@ impl Config {
         service: Service,
         resource: Resource,
     ) -> Self {
-        if let Some(client) =
-            ClientConfig::from_env(&env_prefix(provider, service, Some(resource)))
+        if let Some(client) = ClientConfig::from_env(&env_prefix(provider, service, Some(resource)))
         {
             self.with_resource_client(provider, service, resource, client)
         } else {
@@ -143,8 +141,9 @@ impl Config {
         if let Some(dir) = &self.data_dir {
             return Ok(dir.clone());
         }
-        let base = directories::BaseDirs::new()
-            .ok_or_else(|| Error::StorageUnavailable("could not resolve XDG data directory".into()))?;
+        let base = directories::BaseDirs::new().ok_or_else(|| {
+            Error::StorageUnavailable("could not resolve XDG data directory".into())
+        })?;
         Ok(base.data_dir().join(&self.app_id))
     }
 }
@@ -176,10 +175,7 @@ fn validate_loopback_redirect(uri: &str) -> Result<()> {
             "redirect URI must use http://127.0.0.1".into(),
         ));
     }
-    if !parsed.username().is_empty()
-        || parsed.password().is_some()
-        || parsed.fragment().is_some()
-    {
+    if !parsed.username().is_empty() || parsed.password().is_some() || parsed.fragment().is_some() {
         return Err(Error::InvalidClientConfig(
             "redirect URI must not contain credentials or a fragment".into(),
         ));

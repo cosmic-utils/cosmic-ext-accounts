@@ -217,9 +217,7 @@ fn base_scopes(provider: Provider) -> &'static [&'static str] {
 fn service_scopes(service: Service, resource: Resource) -> &'static [&'static str] {
     match (service, resource) {
         (Service::Calendar, Resource::Graph) => &["https://graph.microsoft.com/calendars.read"],
-        (Service::Calendar, Resource::Primary) => {
-            &["https://www.googleapis.com/auth/calendar"]
-        }
+        (Service::Calendar, Resource::Primary) => &["https://www.googleapis.com/auth/calendar"],
         (Service::Mail, Resource::Graph) => &[
             "https://graph.microsoft.com/Mail.ReadWrite",
             "https://graph.microsoft.com/Mail.Send",
@@ -229,12 +227,8 @@ fn service_scopes(service: Service, resource: Resource) -> &'static [&'static st
             "https://outlook.office.com/SMTP.Send",
         ],
         (Service::Mail, Resource::Primary) => &["https://mail.google.com/"],
-        (Service::Contacts, Resource::Graph) => {
-            &["https://graph.microsoft.com/contacts.read"]
-        }
-        (Service::Contacts, Resource::Primary) => {
-            &["https://www.googleapis.com/auth/contacts"]
-        }
+        (Service::Contacts, Resource::Graph) => &["https://graph.microsoft.com/contacts.read"],
+        (Service::Contacts, Resource::Primary) => &["https://www.googleapis.com/auth/contacts"],
         (Service::Tasks, Resource::Graph) => &[
             "https://graph.microsoft.com/tasks.readwrite",
             "https://graph.microsoft.com/tasks.readwrite.shared",
@@ -259,7 +253,11 @@ pub fn authorization_scopes(provider: Provider, service: Service) -> Vec<String>
         .map(|scope| (*scope).to_owned())
         .collect();
     for resource in resources_for(provider, service) {
-        scopes.extend(service_scopes(service, resource).iter().map(|s| (*s).to_owned()));
+        scopes.extend(
+            service_scopes(service, resource)
+                .iter()
+                .map(|s| (*s).to_owned()),
+        );
     }
     scopes.sort();
     scopes.dedup();
@@ -267,11 +265,7 @@ pub fn authorization_scopes(provider: Provider, service: Service) -> Vec<String>
 }
 
 /// Scopes used when refreshing a particular resource.
-pub fn resource_scopes(
-    provider: Provider,
-    service: Service,
-    resource: Resource,
-) -> Vec<String> {
+pub fn resource_scopes(provider: Provider, service: Service, resource: Resource) -> Vec<String> {
     let mut scopes: Vec<String> = base_scopes(provider)
         .iter()
         .map(|scope| (*scope).to_owned())

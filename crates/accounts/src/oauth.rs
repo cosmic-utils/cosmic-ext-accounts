@@ -5,8 +5,8 @@ use std::{collections::HashMap, time::Duration};
 use chrono::{Duration as ChronoDuration, Utc};
 use oauth2::{
     AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-    PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl,
-    basic::BasicClient, reqwest::async_http_client,
+    PkceCodeVerifier, RedirectUrl, Scope, TokenResponse, TokenUrl, basic::BasicClient,
+    reqwest::async_http_client,
 };
 use serde_json::Value;
 use tokio::{
@@ -22,9 +22,7 @@ use uuid::Uuid;
 use crate::{
     config::Config,
     error::{Error, Result},
-    model::{
-        Account, CalDavSettings, Credential, Endpoint, Provider, SecretString, Service,
-    },
+    model::{Account, CalDavSettings, Credential, Endpoint, Provider, SecretString, Service},
     provider::{self, spec},
 };
 
@@ -94,8 +92,7 @@ impl AuthManager {
             .and_then(|spec| spec.oauth)
             .ok_or(Error::UnsupportedProvider(provider, service))?;
         let resource = provider::primary_resource(provider, service);
-        let (client_config, redirect_template) =
-            self.config.client(provider, service, resource)?;
+        let (client_config, redirect_template) = self.config.client(provider, service, resource)?;
 
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -163,8 +160,12 @@ impl AuthManager {
                 task,
             },
         );
-        self.handles
-            .insert(state.clone(), PendingHandle { cancel: cancel_sender });
+        self.handles.insert(
+            state.clone(),
+            PendingHandle {
+                cancel: cancel_sender,
+            },
+        );
 
         Ok(AuthRequest {
             provider,
@@ -176,10 +177,7 @@ impl AuthManager {
 
     /// Waits for the browser callback, validates state, exchanges the code and
     /// returns an account plus its initial credentials.
-    pub(crate) fn take(
-        &mut self,
-        state: &str,
-    ) -> Option<(PendingAuth, PendingHandle)> {
+    pub(crate) fn take(&mut self, state: &str) -> Option<(PendingAuth, PendingHandle)> {
         let pending = self.pending.remove(state)?;
         let handle = self.handles.remove(state)?;
         Some((pending, handle))
@@ -202,9 +200,9 @@ impl AuthManager {
             return Err(Error::InvalidState);
         }
 
-        let oauth = spec(pending.provider)
-            .and_then(|spec| spec.oauth)
-            .ok_or(Error::UnsupportedProvider(pending.provider, pending.service))?;
+        let oauth = spec(pending.provider).and_then(|spec| spec.oauth).ok_or(
+            Error::UnsupportedProvider(pending.provider, pending.service),
+        )?;
         let client = BasicClient::new(
             ClientId::new(pending.client_id.clone()),
             pending
@@ -225,9 +223,7 @@ impl AuthManager {
 
         let token = client
             .exchange_code(AuthorizationCode::new(code))
-            .set_pkce_verifier(PkceCodeVerifier::new(
-                pending.verifier.secret().clone(),
-            ))
+            .set_pkce_verifier(PkceCodeVerifier::new(pending.verifier.secret().clone()))
             .request_async(async_http_client)
             .await
             .map_err(|error| Error::AuthenticationFailed(error.to_string()))?;

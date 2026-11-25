@@ -15,10 +15,10 @@ use uuid::Uuid;
 use crate::model::CalDavSettings;
 #[cfg(any(feature = "calendar", feature = "mail", feature = "contacts"))]
 use crate::model::Endpoint;
-#[cfg(feature = "contacts")]
-use crate::model::{CalDavSettings, LdapSettings};
 #[cfg(feature = "mail")]
 use crate::model::ImapSmtpSettings;
+#[cfg(feature = "contacts")]
+use crate::model::{CalDavSettings, LdapSettings};
 use crate::{
     config::Config,
     error::{Error, Result},
@@ -156,12 +156,14 @@ impl Accounts {
 
         let id = account.id;
         let generation = account.generation;
-        next.credentials.retain(|credential| credential.account_id != id);
-        next.credentials.extend(completed.credentials.into_iter().map(|mut credential| {
-            credential.account_id = id;
-            credential.generation = generation;
-            credential
-        }));
+        next.credentials
+            .retain(|credential| credential.account_id != id);
+        next.credentials
+            .extend(completed.credentials.into_iter().map(|mut credential| {
+                credential.account_id = id;
+                credential.generation = generation;
+                credential
+            }));
         if let Some(existing) = next.accounts.iter_mut().find(|item| item.id == id) {
             *existing = account.clone();
         } else {
@@ -186,9 +188,7 @@ impl Accounts {
             .get(id)
             .await
             .ok_or_else(|| Error::AccountNotFound(id.to_string()))?;
-        let request = self
-            .begin_auth(account.provider, account.service)
-            .await?;
+        let request = self.begin_auth(account.provider, account.service).await?;
         self.reconnects
             .lock()
             .await
@@ -251,14 +251,18 @@ impl Accounts {
             .ok_or_else(|| Error::AccountNotFound(id.to_string()))?;
         let mut next = data.clone();
         next.accounts.retain(|account| account.id != id);
-        next.credentials.retain(|credential| credential.account_id != id);
+        next.credentials
+            .retain(|credential| credential.account_id != id);
         self.store.save(&next)?;
         *data = next;
         drop(data);
         drop(_account_guard);
 
         self.refresh_locks.lock().await.remove(&id);
-        self.cache.lock().await.retain(|key, _| key.account_id != id);
+        self.cache
+            .lock()
+            .await
+            .retain(|key, _| key.account_id != id);
         self.emit(account.service);
         Ok(())
     }
@@ -354,10 +358,12 @@ impl Accounts {
             .clone()
             .ok_or_else(|| Error::NeedsReauth(id.to_string()))?;
 
-        let (client_config, _) = self.config.client(account.provider, account.service, resource)?;
-        let oauth = spec(account.provider)
-            .and_then(|spec| spec.oauth)
-            .ok_or(Error::UnsupportedProvider(account.provider, account.service))?;
+        let (client_config, _) = self
+            .config
+            .client(account.provider, account.service, resource)?;
+        let oauth = spec(account.provider).and_then(|spec| spec.oauth).ok_or(
+            Error::UnsupportedProvider(account.provider, account.service),
+        )?;
         let client = BasicClient::new(
             ClientId::new(client_config.client_id),
             client_config
