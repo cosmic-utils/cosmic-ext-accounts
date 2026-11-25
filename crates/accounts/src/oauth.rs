@@ -32,7 +32,6 @@ const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 pub struct AuthRequest {
     pub provider: Provider,
     pub service: Service,
-    /// CSRF state; pass it back to `complete` and `cancel`.
     pub state: String,
     pub url: String,
 }
@@ -83,9 +82,6 @@ impl AuthManager {
     }
 
     /// Starts a sign-in for one provider and service.
-    ///
-    /// The returned URL must be opened in the system browser. The local
-    /// callback listener is already running on an ephemeral loopback port.
     pub async fn begin(&mut self, provider: Provider, service: Service) -> Result<AuthRequest> {
         provider::ensure_supported(provider, service)?;
         let oauth = spec(provider)

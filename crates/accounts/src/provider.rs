@@ -98,9 +98,6 @@ pub fn spec(provider: Provider) -> Option<&'static ProviderSpec> {
 }
 
 /// Providers offered for a service in this build.
-///
-/// A binary built with several service features still sees only the providers
-/// valid for the service passed to its panel.
 pub fn providers_for(service: Service) -> Vec<Provider> {
     match service {
         Service::Calendar => {

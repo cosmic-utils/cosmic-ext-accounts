@@ -9,26 +9,15 @@ use crate::{
 };
 
 /// OAuth client registration for one provider and service.
-///
-/// `resource` allows a separate registration for a particular token resource,
-/// for example an Exchange Online registration used only for IMAP/SMTP. When
-/// absent, the registration is shared by every resource of the service.
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
     pub client_id: String,
     pub client_secret: Option<SecretString>,
-    /// Redirect URI with `http://127.0.0.1` as host. The port is replaced with
-    /// an ephemeral listener port when a sign-in starts.
     pub redirect_uri: Option<String>,
 }
 
 impl ClientConfig {
     /// Reads a client registration from environment variables.
-    ///
-    /// For example, `ClientConfig::from_env("ACCOUNTS_GOOGLE_CALENDAR")`
-    /// reads `ACCOUNTS_GOOGLE_CALENDAR_CLIENT_ID`, `_CLIENT_SECRET` and
-    /// `_REDIRECT_URI`. The secret is optional; Google desktop clients may be
-    /// public clients with only an ID, while other registrations need both.
     pub fn from_env(prefix: &str) -> Option<Self> {
         let client_id = std::env::var(format!("{prefix}_CLIENT_ID")).ok()?;
         let client_secret = std::env::var(format!("{prefix}_CLIENT_SECRET"))
@@ -49,7 +38,6 @@ pub type ClientKey = (Provider, Service, Option<Resource>);
 pub struct Config {
     pub app_id: String,
     pub clients: HashMap<ClientKey, ClientConfig>,
-    /// Overrides the app-private data directory. Intended for tests.
     pub data_dir: Option<PathBuf>,
 }
 
@@ -84,8 +72,6 @@ impl Config {
     }
 
     /// Adds a service client from `ACCOUNTS_<PROVIDER>_<SERVICE>_*`.
-    /// Missing variables are ignored; the sign-in attempt then reports a
-    /// missing client configuration.
     pub fn with_client_from_env(self, provider: Provider, service: Service) -> Self {
         if let Some(client) = ClientConfig::from_env(&env_prefix(provider, service, None)) {
             self.with_client(provider, service, client)

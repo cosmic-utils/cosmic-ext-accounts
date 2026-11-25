@@ -67,11 +67,6 @@ impl Provider {
 }
 
 /// Identifies the resource a credential is valid for.
-///
-/// Microsoft Graph and Exchange Online are deliberately separate: a Graph
-/// token cannot authenticate IMAP or SMTP, and an Exchange token cannot call
-/// Graph. Keeping them separate also prevents scope-set collisions in the
-/// credential cache.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum Resource {
     Primary,
@@ -145,8 +140,6 @@ pub struct Account {
     pub email: Option<String>,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
-    /// Incremented on reconnect and removal. Cached credentials and in-flight
-    /// refreshes carrying an older generation are discarded.
     pub generation: u64,
     pub endpoint: Endpoint,
 }
@@ -202,7 +195,6 @@ pub struct Credential {
     pub expires_at: Option<DateTime<Utc>>,
     pub scope: Vec<String>,
     pub token_type: String,
-    /// Password or opaque handler blob for non-OAuth accounts.
     pub secret: Option<Vec<u8>>,
     pub generation: u64,
 }

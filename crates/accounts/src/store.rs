@@ -39,9 +39,6 @@ impl SecretStore {
     }
 
     /// Opens the store with an explicitly supplied master secret.
-    ///
-    /// Used by hosts that obtain the portal secret themselves and by local
-    /// verification without a running portal.
     pub fn open_with_key(config: &Config, master: &[u8]) -> Result<Self> {
         if master.is_empty() {
             return Err(Error::StorageUnavailable(

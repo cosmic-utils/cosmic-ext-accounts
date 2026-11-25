@@ -38,11 +38,6 @@ pub fn provider_label(provider: Provider) -> &'static str {
 }
 
 /// Starts a browser sign-in and returns the request to complete later.
-///
-/// This deliberately does not open a browser: hosts store the pending request
-/// first, then call [`open_sign_in_url`]. That lets the drawer show the
-/// sign-in screen even when launching the browser fails, with an action to
-/// retry opening it.
 pub async fn begin_sign_in(
     accounts: &Accounts,
     provider: Provider,
@@ -137,9 +132,6 @@ impl<'a> Default for Labels<'a> {
 }
 
 /// One account as it should appear in the host application.
-///
-/// Hosts pass their own rows because local enablement and sync status often
-/// live in the application rather than in the embedded account manager.
 pub struct AccountRow<'a> {
     pub id: AccountId,
     pub provider: Provider,
