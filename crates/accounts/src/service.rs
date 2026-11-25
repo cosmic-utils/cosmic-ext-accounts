@@ -14,7 +14,7 @@ use crate::error::{Error, Result};
     feature = "tasks"
 ))]
 use crate::manager::Accounts;
-#[cfg(any(feature = "calendar", feature = "mail", feature = "contacts"))]
+#[cfg(any(feature = "calendar", feature = "mail"))]
 use crate::model::{Provider, Resource};
 #[cfg(any(
     feature = "calendar",
