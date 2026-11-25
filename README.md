@@ -1,11 +1,8 @@
-<div align="center">
-  <br>
-  <h1>Accounts for COSMIC apps</h1>
+# Accounts for COSMIC apps
 
-  <p>Embedded, app-owned online accounts</p>
-</div>
+#### Embedded, app-owned online accounts
 
-Accounts is a single-crate, headless Rust library for managing online accounts.
+Accounts is a Rust library for managing online accounts.
 Each application picks the service features it needs, stores its own accounts
 in its own data directory, and owns its own credentials.
 
