@@ -183,6 +183,14 @@ pub struct View<'a, M> {
     pub on_sync: Option<&'a dyn Fn(AccountId) -> M>,
 }
 
+struct OverviewActions<'a, M> {
+    on_add_open: &'a dyn Fn() -> M,
+    on_remove: &'a dyn Fn(AccountId) -> M,
+    on_reconnect: &'a dyn Fn(AccountId) -> M,
+    on_toggle: &'a dyn Fn(AccountId, bool) -> M,
+    on_sync: Option<&'a dyn Fn(AccountId) -> M>,
+}
+
 /// Builds the account page for one service at context-drawer width.
 pub fn view<'a, M>(view: View<'a, M>) -> Element<'a, M>
 where
@@ -211,11 +219,13 @@ where
         providers.is_empty(),
         &view.labels,
         view.footer,
-        view.on_add_open,
-        view.on_remove,
-        view.on_reconnect,
-        view.on_toggle,
-        view.on_sync,
+        OverviewActions {
+            on_add_open: view.on_add_open,
+            on_remove: view.on_remove,
+            on_reconnect: view.on_reconnect,
+            on_toggle: view.on_toggle,
+            on_sync: view.on_sync,
+        },
     )
 }
 
@@ -225,11 +235,7 @@ fn overview<'a, M>(
     no_providers: bool,
     labels: &Labels<'a>,
     footer: Option<Element<'a, M>>,
-    on_add_open: &'a dyn Fn() -> M,
-    on_remove: &'a dyn Fn(AccountId) -> M,
-    on_reconnect: &'a dyn Fn(AccountId) -> M,
-    on_toggle: &'a dyn Fn(AccountId, bool) -> M,
-    on_sync: Option<&'a dyn Fn(AccountId) -> M>,
+    actions: OverviewActions<'a, M>,
 ) -> Element<'a, M>
 where
     M: Clone + 'static,
@@ -249,10 +255,10 @@ where
         column = column.push(account_card(
             row,
             labels,
-            on_remove,
-            on_reconnect,
-            on_toggle,
-            on_sync,
+            actions.on_remove,
+            actions.on_reconnect,
+            actions.on_toggle,
+            actions.on_sync,
         ));
     }
 
@@ -263,7 +269,7 @@ where
             widget::button::standard(labels.add.clone())
                 .leading_icon(widget::icon::from_name("list-add-symbolic").size(16))
                 .width(Length::Fill)
-                .on_press(on_add_open()),
+                .on_press((actions.on_add_open)()),
         );
     }
 

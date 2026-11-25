@@ -1,110 +1,133 @@
 <div align="center">
   <br>
-  <img src="crates/ui/resources/icons/hicolor/scalable/apps/icon.svg" width="128" alt="Accounts for COSMIC icon">
-  <h1>Accounts for COSMIC™</h1>
+  <h1>Accounts for COSMIC apps</h1>
 
-  <p>Sign in once, use everywhere</p>
-
-  ![window-light.png](crates/ui/resources/screenshots/welcome-light.png#gh-light-mode-only)
-  ![window-dark.png](crates/ui/resources/screenshots/welcome-dark.png#gh-dark-mode-only)
+  <p>Embedded, app-owned online accounts</p>
 </div>
 
-Add your online account once, and every COSMIC app that needs it can use it. No more signing in
-separately in each app, and no passwords stored by apps that don't need them.
+`accounts` is a headless Rust library that Calendar, Mail, and Tasks embed to
+manage their own online accounts. There is no separate Accounts app, daemon,
+consent prompt, polkit policy, D-Bus broker, or shared account database. Each
+application picks the service features it needs, stores its own accounts in its
+own data directory, and owns its own credentials.
 
-## Installation
+## What it provides
 
-Install a configured release package with `sudo apt install ./cosmic-ext-accounts_VERSION_ARCH.deb`.
-For a source checkout, `just install` builds the app and installs its shared files, including the
-polkit policy. Source installs preserve existing system provider manifests. After an upgrade,
-sign out and back in so the session loads the new daemon. Open **Accounts for COSMIC**
-from your app launcher to sign in.
+- Google and Microsoft OAuth authorization-code sign-in with PKCE and an
+  ephemeral `127.0.0.1` redirect listener.
+- Service-scoped identity and tokens: Calendar, Mail, Contacts, and Tasks do not
+  share accounts.
+- Separate Microsoft Graph and Exchange Online registrations so Graph tokens
+  are never reused for IMAP/SMTP.
+- Custom CalDAV, IMAP/SMTP, CardDAV, and LDAP account forms, gated by features.
+- An app-private encrypted credential store backed by the Secret portal. There
+  is no plaintext or in-memory-only fallback; locked or unavailable storage
+  fails sign-in.
+- Token caching by account, resource, and scope set; serialized refresh and
+  rotation; and generation counters that invalidate stale credentials after
+  reconnect or removal.
+- An optional `libcosmic` context-drawer panel with provider picker, pending
+  sign-in page, account cards, and narrow custom forms.
 
-The daemon runs on each user's session bus. Access and refresh tokens are stored in that user's
-Secret Service keyring, and grants remain in the user's profile. The broker checks the caller's Unix
-UID, polkit authorization, and app consent before issuing tokens. Each daemon uses its own loopback
-port for OAuth redirects.
+## Add it to an application
 
-System provider manifests are installed under `/usr/share/accounts/providers`. For a source
-installation, copy the template you need to `${XDG_DATA_HOME:-$HOME/.local/share}/accounts/providers`
-and set the client configuration there. User overrides take precedence over the system defaults.
-Keep private OAuth credentials in a user-only file. For shared desktop client settings, export
-`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `MICROSOFT_CLIENT_ID`, then run
-`just configure-providers /usr/share/accounts/providers/`. The recipe uses `sudo` to install the
-configured manifests, which are readable by all local users. Sign out and back in after updating
-either location so the daemon reloads the manifests.
+```toml
+[dependencies]
+accounts = { path = "../cosmic-ext-accounts/crates/accounts", features = ["calendar", "libcosmic"] }
+```
 
-### Building a release package
+Features are additive and optional:
 
-On the Debian-based release you want to support, install `dpkg-dev` and set `GOOGLE_CLIENT_ID`,
-`GOOGLE_CLIENT_SECRET`, and `MICROSOFT_CLIENT_ID` for distributable native desktop clients.
-Run `just package-native` to build the package under `target/native/`. The provider registrations
-must accept an ephemeral port on the configured `http://127.0.0.1` loopback redirect. The package
-includes the shared desktop client configuration.
+| Feature | Enables |
+| --- | --- |
+| `calendar` | Calendar accounts and CalDAV credentials |
+| `mail` | Mail accounts, IMAP/SMTP, Graph, and Exchange credentials |
+| `contacts` | Contacts accounts, CardDAV, and LDAP credentials |
+| `tasks` | Tasks accounts and task credentials |
+| `libcosmic` | Reusable COSMIC widgets; implies `open` for browser launch |
 
-## Custom IMAP/SMTP accounts
+Headless builds work with any subset of the service features and without
+`libcosmic`.
 
-Open **Accounts for COSMIC → Add account → Add Other Account... → Add email account**. Enter the email address,
-server names and ports, and a password or app password. IMAP uses implicit TLS, typically
-on port 993. SMTP supports STARTTLS (typically port 587) and implicit TLS (typically port 465).
-The saved password goes into your desktop keyring. Select **Update mail password** on the
-account page to replace it.
+```rust
+use accounts::{Accounts, Config, Provider, Service};
 
-In Mail, open **Settings → Mail accounts** and select **Link** next to the account. The consent prompt
-asks whether Mail may retrieve the password. Revoking access blocks new password requests.
-If you need to invalidate a password an app has already obtained, rotate it on your mail server.
+let config = Config::new("dev.example.Calendar")
+    .with_client_from_env(Provider::Google, Service::Calendar)
+    .with_client_from_env(Provider::Microsoft, Service::Calendar);
 
-## CalDAV accounts
+let accounts = Accounts::new(config).await?;
+let calendar_accounts = accounts.list(Service::Calendar).await;
+```
 
-Open **Add account → Add Other Account... → Add CalDAV account**. Enter the HTTPS CalDAV URL
-from your server, your username, and a password or app password. Accounts stores the password
-in your desktop keyring. Use **Update calendar password** on the account page to replace it.
+To sign in, keep the pending request before opening the browser so the UI can
+show the wait state even if the browser launch fails:
 
-Calendar applications can discover the account and its `Endpoint.Calendar` URL and
-authentication method. For a custom account, `Credentials.GetCalDavAccess` returns the
-HTTPS URL, username, and password together after Calendar consent. Clients should use HTTP
-Basic authentication on the configured origin over TLS and keep credentials on that origin
-when following redirects. Revoking consent blocks future requests to Accounts. Rotate the
-password on your server to invalidate a copy an application already retrieved.
+```rust
+let request = accounts::ui::begin_sign_in(&accounts, Provider::Google, Service::Calendar).await?;
+accounts::ui::open_sign_in_url(&request)?;
+let account = accounts.complete_auth(request).await?;
+```
 
-## CardDAV and LDAP accounts
+Feature-gated accessors return credentials for the calling app only:
+`calendar_credentials(id)`, `mail_access(id)`, `contacts_credentials(id)`, and
+`tasks_credentials(id)`.
 
-Under **Add Other Account...**, choose **Add CardDAV account** or **Add LDAP account**.
-CardDAV uses an HTTPS URL, username, and password or app password. LDAP uses an
-`ldaps://` server URL, a bind username or distinguished name (DN), a separate search
-base DN, and a password. Accounts stores these passwords in the desktop keyring. Use
-**Update contacts password** on the account page to replace one.
+## OAuth client configuration
 
-Contacts apps can read the protocol, server URL, and search base through
-`Endpoint.Contacts.GetConnectionSettings`. For custom accounts,
-`Credentials.GetContactAccess` returns those settings with the login and password
-after Contacts consent. Use HTTPS Basic authentication for CardDAV and a simple bind
-over TLS for LDAP, keeping credentials on the configured server.
+Client registrations are supplied by the embedding application. The library
+does not ship client IDs or secrets. `with_client_from_env` reads:
 
-## Mail clients
+| Service | Google | Microsoft |
+| --- | --- | --- |
+| Calendar | `ACCOUNTS_GOOGLE_CALENDAR_CLIENT_ID` | `ACCOUNTS_MICROSOFT_CALENDAR_CLIENT_ID` |
+| Mail | `ACCOUNTS_GOOGLE_MAIL_CLIENT_ID` | `ACCOUNTS_MICROSOFT_MAIL_CLIENT_ID` |
+| Contacts | `ACCOUNTS_GOOGLE_CONTACTS_CLIENT_ID` | `ACCOUNTS_MICROSOFT_CONTACTS_CLIENT_ID` |
+| Tasks | `ACCOUNTS_GOOGLE_TASKS_CLIENT_ID` | `ACCOUNTS_MICROSOFT_TASKS_CLIENT_ID` |
 
-Mail clients can discover supported transports through `Endpoint.Mail.GetConnectionSettings`.
-`Credentials.GetMailAccess` applies the account's Email grant and returns the current, validated
-connection settings with an OAuth token for Gmail or Exchange Online. Microsoft IMAP and SMTP
-use an Exchange Online token, while the generic credential API continues to return the provider's
-primary token for Microsoft Graph. Custom accounts use `Credentials.GetMailPassword` to get
-settings, username, and password after Email consent.
+Mail also accepts `ACCOUNTS_MICROSOFT_MAIL_EXCHANGE_CLIENT_ID` for the separate
+Exchange Online IMAP/SMTP registration. Each prefix supports optional
+`_CLIENT_SECRET` and `_REDIRECT_URI` variables. The redirect URI must use
+`http://127.0.0.1`; the library replaces the port with an ephemeral listener
+port for every sign-in. Registrations can also be injected directly with
+`Config::with_client` and `Config::with_resource_client`.
 
-For an existing Microsoft setup, merge the updated provider template into the installed
-`microsoft.toml` while keeping your OAuth client configuration. Register the delegated Graph
-`Mail.ReadWrite` and `Mail.Send` permissions and the delegated Exchange Online
-`IMAP.AccessAsUser.All` and `SMTP.Send` permissions for that client. Reconnect the account
-to grant the new scopes.
+## Reusable UI
+
+With `libcosmic`, `accounts::ui::view` renders the shared Accounts page. Hosts
+provide localized `Labels`, the current accounts and pending request, and
+callbacks for add, cancel, remove, reconnect, toggle, and optional per-account
+sync. The library filters providers by the runtime `Service`, so a combined
+build only shows the providers and forms valid for that service. Hosts own the
+state and deliver errors through their toaster.
+
+## Development
+
+```sh
+just build
+just test
+just check-features
+just check
+```
+
+`just check-features` verifies headless builds, each individual service
+feature, and the full `libcosmic` build.
+
+## Applications using this library
+
+- [COSMIC Calendar](https://github.com/cosmic-utils/cosmic-ext-calendar)
+- [COSMIC Mail](https://github.com/cosmic-utils/cosmic-ext-mail)
+- [COSMIC Tasks](https://github.com/cosmic-utils/cosmic-ext-tasks)
 
 ## Contributing
 
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md).
+Contributions are welcome. Please open an issue before starting larger changes.
 
-## Related Projects
+## Related projects
 
-- [GNOME Online Accounts](https://gitlab.gnome.org/GNOME/gnome-online-accounts) - Inspiration for this project
+- [GNOME Online Accounts](https://gitlab.gnome.org/GNOME/gnome-online-accounts) - inspiration for this project
 - [libcosmic](https://github.com/pop-os/libcosmic) - COSMIC UI toolkit
-- [COSMIC Desktop](https://github.com/pop-os/cosmic-epoch) - The COSMIC desktop environment
+- [COSMIC Desktop](https://github.com/pop-os/cosmic-epoch) - the COSMIC desktop environment
 
 ## Support
 

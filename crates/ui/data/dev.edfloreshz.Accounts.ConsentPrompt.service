@@ -1,3 +1,0 @@
-[D-BUS Service]
-Name=dev.edfloreshz.Accounts.ConsentPrompt
-Exec=/usr/bin/accounts_ui --consent-prompt

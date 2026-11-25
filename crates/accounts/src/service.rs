@@ -181,7 +181,7 @@ impl Accounts {
                 smtp_starttls: settings.smtp_starttls,
             },
             _ => provider_mail_settings(account.provider)
-                .ok_or_else(|| Error::UnsupportedProvider(account.provider, Service::Mail))?,
+                .ok_or(Error::UnsupportedProvider(account.provider, Service::Mail))?,
         };
 
         let resource = if account.provider == Provider::Microsoft {

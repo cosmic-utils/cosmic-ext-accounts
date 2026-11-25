@@ -1,37 +1,21 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/accounts",
-    "crates/core",
-    "crates/consent",
-    "crates/daemon",
-    "crates/ui",
-    "crates/example-handler",
-]
+members = ["crates/accounts"]
 
 [workspace.dependencies]
 oauth2 = "4.4"
 serde_json = "1.0"
 thiserror = "1.0"
-toml = "0.8"
 tracing = "0.1"
-tracing-subscriber = "0.3"
 url = "2.4"
 
 [workspace.dependencies.chrono]
 version = "0.4"
 features = ["serde", "clock"]
 
-[workspace.dependencies.cosmic-config]
-git = "https://github.com/pop-os/libcosmic"
-
 [workspace.dependencies.reqwest]
 version = "0.11"
 features = ["json"]
-
-[workspace.dependencies.secret-service]
-version = "5.0.0"
-features = ["rt-tokio-crypto-rust"]
 
 [workspace.dependencies.serde]
 version = "1.0"
@@ -47,8 +31,3 @@ features = [
     "v4",
     "serde",
 ]
-
-[workspace.dependencies.zbus]
-version = "5.11.0"
-features = ["tokio"]
-default-features = false
