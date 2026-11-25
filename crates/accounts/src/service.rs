@@ -1,11 +1,29 @@
 //! Service-specific credential types returned to consuming applications.
 
-#[cfg(any(feature = "calendar", feature = "mail", feature = "contacts"))]
+#[cfg(any(
+    feature = "calendar",
+    feature = "mail",
+    feature = "contacts",
+    feature = "tasks"
+))]
+use crate::error::{Error, Result};
+#[cfg(any(
+    feature = "calendar",
+    feature = "mail",
+    feature = "contacts",
+    feature = "tasks"
+))]
 use crate::manager::Accounts;
 #[cfg(any(feature = "calendar", feature = "mail", feature = "contacts"))]
-use crate::{error::{Error, Result}, model::{Provider, Resource, SecretString, Service}};
-
-#[cfg(feature = "calendar")]
+use crate::model::{Provider, Resource};
+#[cfg(any(
+    feature = "calendar",
+    feature = "mail",
+    feature = "contacts",
+    feature = "tasks"
+))]
+use crate::model::{SecretString, Service};
+#[cfg(any(feature = "calendar", feature = "contacts", feature = "tasks"))]
 use crate::provider;
 
 #[cfg(any(feature = "calendar", feature = "mail", feature = "contacts"))]
