@@ -1,12 +1,13 @@
-# Accounts for COSMIC apps
+<div align="center">
+    <img src="assets/icon.svg" width="250" alt="Accounts icon" />
+    <h1>Accounts</h1>
+    <p>A Rust library for managing online accounts in COSMIC™ apps</p>
+</div>
 
-#### Embedded, app-owned online accounts
-
-Accounts is a Rust library for managing online accounts.
 Each application picks the service features it needs, stores its own accounts
 in its own data directory, and owns its own credentials.
 
-## What it provides
+## Features
 
 - Google and Microsoft OAuth authorization-code sign-in with PKCE and an
   ephemeral `127.0.0.1` redirect listener.

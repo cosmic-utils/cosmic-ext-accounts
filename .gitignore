@@ -4,3 +4,4 @@ target/
 *.pdb
 /target
 .zed/
+**/.DS_Store
