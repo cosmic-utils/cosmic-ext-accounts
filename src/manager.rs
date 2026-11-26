@@ -60,7 +60,7 @@ pub struct Accounts {
 }
 
 impl Accounts {
-    /// Opens an app's credential store. This fails if the Secret portal is
+    /// Opens an app's credential store. This fails if secure storage is
     /// unavailable or the existing store cannot be decrypted.
     pub async fn new(config: Config) -> Result<Self> {
         let store = SecretStore::open(&config).await?;

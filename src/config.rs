@@ -127,8 +127,12 @@ impl Config {
         if let Some(dir) = &self.data_dir {
             return Ok(dir.clone());
         }
+        self.default_data_dir()
+    }
+
+    pub(crate) fn default_data_dir(&self) -> Result<PathBuf> {
         let base = directories::BaseDirs::new().ok_or_else(|| {
-            Error::StorageUnavailable("could not resolve XDG data directory".into())
+            Error::StorageUnavailable("could not resolve user data directory".into())
         })?;
         Ok(base.data_dir().join(&self.app_id))
     }

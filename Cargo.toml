@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-only"
 description = "Embedded online account management for COSMIC applications"
-repository = "https://github.com/cosmic-utils/accounts"
+repository = "https://github.com/cosmic-ext-orbit/cosmic-ext-accounts"
 
 [features]
 default = []
@@ -15,7 +15,6 @@ tasks = []
 libcosmic = ["dep:libcosmic", "dep:open"]
 
 [dependencies]
-ashpd = { version = "0.12", default-features = false, features = ["tokio"] }
 async-trait = "0.1"
 base64 = "0.22"
 chacha20poly1305 = "0.10"
@@ -37,3 +36,12 @@ zeroize = "1"
 
 libcosmic = { git = "https://github.com/pop-os/libcosmic", optional = true }
 open = { version = "5", optional = true }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+ashpd = { version = "0.12", default-features = false, features = ["tokio"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", features = ["apple-native"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6.3", features = ["windows-native"] }

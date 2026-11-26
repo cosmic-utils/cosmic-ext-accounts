@@ -15,9 +15,9 @@ in its own data directory, and owns its own credentials.
 - Separate Microsoft Graph and Exchange Online registrations so Graph tokens
   are never reused for IMAP/SMTP.
 - Custom CalDAV, IMAP/SMTP, CardDAV, and LDAP account forms, gated by features.
-- An app-private encrypted credential store backed by the Secret portal. There
-  is no plaintext or in-memory-only fallback; locked or unavailable storage
-  fails sign-in.
+- An app-private encrypted credential store. The master secret lives in macOS
+  Keychain, Windows Credential Manager, or the XDG Secret portal on Linux.
+  Locked or unavailable secure storage prevents the store from opening.
 - Token caching by account, resource, and scope set; serialized refresh and
   rotation; and generation counters that invalidate stale credentials after
   reconnect or removal.
@@ -28,7 +28,7 @@ in its own data directory, and owns its own credentials.
 
 ```toml
 [dependencies]
-accounts = { git = "https://github.com/cosmic-utils/accounts", features = ["calendar", "libcosmic"] }
+accounts = { git = "https://github.com/cosmic-ext-orbit/cosmic-ext-accounts", features = ["calendar", "libcosmic"] }
 ```
 
 Features are additive and optional:
@@ -110,9 +110,9 @@ feature, and the full `libcosmic` build.
 
 ## Applications using this library
 
-- [COSMIC Calendar](https://github.com/cosmic-utils/cosmic-ext-calendar)
-- [COSMIC Mail](https://github.com/cosmic-utils/cosmic-ext-mail)
-- [COSMIC Tasks](https://github.com/cosmic-utils/cosmic-ext-tasks)
+- [Calendar](https://github.com/cosmic-ext-orbit/cosmic-ext-calendar)
+- [Mail](https://github.com/cosmic-ext-orbit/cosmic-ext-mail)
+- [Tasks](https://github.com/cosmic-ext-orbit/cosmic-ext-tasks)
 
 ## Contributing
 
@@ -126,6 +126,6 @@ Contributions are welcome. Please open an issue before starting larger changes.
 
 ## Support
 
-- [GitHub Issues](https://github.com/cosmic-utils/accounts/issues)
+- [GitHub Issues](https://github.com/cosmic-ext-orbit/cosmic-ext-accounts/issues)
 - [COSMIC Discord](https://discord.gg/cosmic-desktop)
 - [System76 Community](https://chat.pop-os.org/)
